@@ -15,7 +15,7 @@ import { restartLsForProxy } from '../langserver.js';
 import { getLsStatus, stopLanguageServer, startLanguageServer, isLanguageServerRunning } from '../langserver.js';
 import { getStats, resetStats, recordRequest } from './stats.js';
 import { cacheStats, cacheClear } from '../cache.js';
-import { getExperimental, setExperimental } from '../runtime-config.js';
+import { getExperimental, setExperimental, getIdentityPrompts, setIdentityPrompts, resetIdentityPrompt, DEFAULT_IDENTITY_PROMPTS } from '../runtime-config.js';
 import { poolStats as convPoolStats, poolClear as convPoolClear } from '../conversation-pool.js';
 import { getLogs, subscribeToLogs, unsubscribeFromLogs } from './logger.js';
 import { getProxyConfig, setGlobalProxy, setAccountProxy, removeProxy, getEffectiveProxy } from './proxy-config.js';
@@ -96,6 +96,36 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
   if (subpath === '/experimental/conversation-pool' && method === 'DELETE') {
     const n = convPoolClear();
     return json(res, 200, { success: true, cleared: n });
+  }
+
+  // ─── Identity prompts (per-provider editable templates) ─
+  if (subpath === '/identity-prompts' && method === 'GET') {
+    return json(res, 200, {
+      prompts: getIdentityPrompts(),
+      defaults: DEFAULT_IDENTITY_PROMPTS,
+    });
+  }
+  if (subpath === '/identity-prompts' && method === 'PUT') {
+    const prompts = setIdentityPrompts(body || {});
+    return json(res, 200, { success: true, prompts });
+  }
+  if (subpath.match(/^\/identity-prompts\/[^/]+$/) && method === 'DELETE') {
+    const provider = subpath.split('/').pop();
+    const prompts = resetIdentityPrompt(provider);
+    return json(res, 200, { success: true, prompts });
+  }
+
+  // ─── Proxy test — try an HTTP CONNECT through the given proxy ──
+  if (subpath === '/test-proxy' && method === 'POST') {
+    const { host, port, username, password, type = 'http' } = body || {};
+    if (!host || !port) return json(res, 400, { ok: false, error: '缺少 host 或 port' });
+    const startTime = Date.now();
+    try {
+      const result = await testProxy({ host, port: Number(port), username, password, type });
+      return json(res, 200, { ok: true, ...result, latencyMs: Date.now() - startTime });
+    } catch (err) {
+      return json(res, 200, { ok: false, error: err.message, latencyMs: Date.now() - startTime });
+    }
   }
 
   // ─── Cache ────────────────────────────────────────────
@@ -454,4 +484,53 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
   }
 
   json(res, 404, { error: `Dashboard API: ${method} ${subpath} not found` });
+}
+
+// ─── Proxy connectivity test ──────────────────────────────
+// HTTP CONNECT tunnel to api.ipify.org:443 → GET / → the returned IP is the
+// proxy's egress IP. Confirms the proxy works AND that auth is accepted.
+async function testProxy({ host, port, username, password, type }) {
+  const http = await import('node:http');
+  const tls = await import('node:tls');
+  return new Promise((resolve, reject) => {
+    const targetHost = 'api.ipify.org';
+    const targetPort = 443;
+    const authHeader = username
+      ? { 'Proxy-Authorization': 'Basic ' + Buffer.from(`${username}:${password || ''}`).toString('base64') }
+      : {};
+    const req = http.request({
+      host,
+      port,
+      method: 'CONNECT',
+      path: `${targetHost}:${targetPort}`,
+      headers: { Host: `${targetHost}:${targetPort}`, ...authHeader },
+      timeout: 10000,
+    });
+    req.on('connect', (res, socket) => {
+      if (res.statusCode !== 200) {
+        socket.destroy();
+        return reject(new Error(`代理返回 HTTP ${res.statusCode}`));
+      }
+      // Do a quick TLS handshake + GET to verify the tunnel actually works
+      const tlsSock = tls.connect({ socket, servername: targetHost, rejectUnauthorized: false }, () => {
+        tlsSock.write(`GET / HTTP/1.1\r\nHost: ${targetHost}\r\nConnection: close\r\nUser-Agent: WindsurfAPI/ProxyTest\r\n\r\n`);
+      });
+      const chunks = [];
+      tlsSock.on('data', c => chunks.push(c));
+      tlsSock.on('end', () => {
+        const body = Buffer.concat(chunks).toString('utf-8');
+        const match = body.match(/\r\n\r\n([^\r\n]+)/);
+        const ip = match ? match[1].trim() : '';
+        tlsSock.destroy();
+        if (!ip || !/^\d+\.\d+\.\d+\.\d+$/.test(ip)) {
+          return reject(new Error('TLS 隧道建立但返回内容异常'));
+        }
+        resolve({ egressIp: ip, type });
+      });
+      tlsSock.on('error', (err) => reject(new Error(`TLS 失败: ${err.message}`)));
+    });
+    req.on('error', (err) => reject(new Error(`连接失败: ${err.message}`)));
+    req.on('timeout', () => { req.destroy(); reject(new Error('超时（10s）')); });
+    req.end();
+  });
 }

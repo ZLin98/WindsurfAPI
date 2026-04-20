@@ -12,7 +12,7 @@ import { config, log } from '../config.js';
 import { recordRequest } from '../dashboard/stats.js';
 import { isModelAllowed } from '../dashboard/model-access.js';
 import { cacheKey, cacheGet, cacheSet } from '../cache.js';
-import { isExperimentalEnabled } from '../runtime-config.js';
+import { isExperimentalEnabled, getIdentityPromptFor } from '../runtime-config.js';
 import { checkMessageRateLimit } from '../windsurf-api.js';
 import { getEffectiveProxy } from '../dashboard/proxy-config.js';
 import {
@@ -29,22 +29,13 @@ const QUEUE_RETRY_MS = 1_000;
 const QUEUE_MAX_WAIT_MS = 30_000;
 
 // ── Model identity prompt ──────────────────────────────────
-// Maps provider keys to a human-readable maker name and a short persona line.
-// Only used when the experimental "modelIdentityPrompt" toggle is ON.
-const PROVIDER_IDENTITY = {
-  anthropic: { maker: 'Anthropic', persona: 'You are {model}, a large language model created by Anthropic. You are helpful, harmless, and honest. When asked about your identity or which model you are, you respond that you are {model}, made by Anthropic.' },
-  openai:    { maker: 'OpenAI',    persona: 'You are {model}, a large language model created by OpenAI. When asked about your identity, you respond that you are {model}, made by OpenAI.' },
-  google:    { maker: 'Google',    persona: 'You are {model}, a large language model created by Google. When asked about your identity, you respond that you are {model}, made by Google.' },
-  deepseek:  { maker: 'DeepSeek',  persona: 'You are {model}, a large language model created by DeepSeek. When asked about your identity, you respond that you are {model}, made by DeepSeek.' },
-  xai:       { maker: 'xAI',       persona: 'You are {model}, a large language model created by xAI. When asked about your identity, you respond that you are {model}, made by xAI.' },
-  alibaba:   { maker: 'Alibaba',   persona: 'You are {model}, a large language model created by Alibaba. When asked about your identity, you respond that you are {model}, made by Alibaba.' },
-  moonshot:  { maker: 'Moonshot AI', persona: 'You are {model}, a large language model created by Moonshot AI. When asked about your identity, you respond that you are {model}, made by Moonshot AI.' },
-};
-
+// Templates live in runtime-config (editable from the dashboard). Use {model}
+// as a placeholder for the requested model name. Only applied when the
+// experimental "modelIdentityPrompt" toggle is ON.
 function buildIdentitySystemMessage(displayModel, provider) {
-  const entry = PROVIDER_IDENTITY[provider];
-  if (!entry) return null;
-  return entry.persona.replace(/\{model\}/g, displayModel);
+  const template = getIdentityPromptFor(provider);
+  if (!template) return null;
+  return template.replace(/\{model\}/g, displayModel);
 }
 
 function genId() {

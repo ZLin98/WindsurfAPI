@@ -312,6 +312,10 @@ code {
 
 .btn-group { display: inline-flex; gap: 6px; flex-wrap: wrap; }
 
+.btn.active, .btn.active:hover {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+}
+
 /* ─── Switch ──────────────────────────────────── */
 .switch { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
 .switch input { opacity: 0; width: 0; height: 0; }
@@ -1043,12 +1047,12 @@ window._firebaseOAuth = async function(provider) {
       <div class="section-header">
         <div>
           <div class="section-title">登录代理（可选）</div>
-          <div class="section-desc">为本次登录指定代理；留空则使用全局代理设置</div>
+          <div class="section-desc">为本次登录指定代理；留空则使用全局代理设置。代理生效后账号的后续聊天请求也会经此代理出站</div>
         </div>
       </div>
       <div class="section-body">
         <div class="field-row">
-          <div class="field">
+          <div class="field" style="max-width:120px">
             <label class="field-label">类型</label>
             <select id="wl-proxy-type" class="select">
               <option value="http">HTTP</option>
@@ -1056,11 +1060,11 @@ window._firebaseOAuth = async function(provider) {
               <option value="socks5">SOCKS5</option>
             </select>
           </div>
-          <div class="field">
+          <div class="field" style="flex:2">
             <label class="field-label">主机</label>
             <input id="wl-proxy-host" class="input" placeholder="留空=使用全局">
           </div>
-          <div class="field">
+          <div class="field" style="max-width:110px">
             <label class="field-label">端口</label>
             <input id="wl-proxy-port" class="input" placeholder="8080" type="number">
           </div>
@@ -1072,6 +1076,13 @@ window._firebaseOAuth = async function(provider) {
             <label class="field-label">密码</label>
             <input id="wl-proxy-pass" class="input" type="password" placeholder="可选">
           </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+          <button class="btn btn-outline btn-sm" onclick="App.testLoginProxy()" id="wl-proxy-test-btn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="10"/></svg>
+            测试代理
+          </button>
+          <span id="wl-proxy-test-result" class="text-sm text-muted"></span>
         </div>
       </div>
     </div>
@@ -1338,23 +1349,55 @@ window._firebaseOAuth = async function(provider) {
     <div class="page-header">
       <div>
         <h1 class="page-title">统计分析</h1>
-        <div class="page-subtitle">请求量、成功率与模型使用情况</div>
+        <div class="page-subtitle">请求量、成功率、延迟分位数与账号/模型维度统计</div>
       </div>
-      <button class="btn btn-danger btn-sm" onclick="App.resetStats()">重置统计</button>
+      <div class="btn-group">
+        <button class="btn btn-ghost btn-sm" onclick="App.loadStats()" title="刷新">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M21 12a9 9 0 0 1-9 9 9 9 0 0 1-6.24-2.52L3 21"/><path d="M3 12a9 9 0 0 1 9-9 9 9 0 0 1 6.24 2.52L21 3"/><path d="M21 3v6h-6"/><path d="M3 21v-6h6"/></svg>
+          刷新
+        </button>
+        <button class="btn btn-danger btn-sm" onclick="App.resetStats()">重置统计</button>
+      </div>
     </div>
     <div class="metrics-grid" id="stats-cards"></div>
     <div class="chart">
-      <h3>请求量（最近 24 小时）</h3>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:10px">
+        <h3 style="margin:0">请求量时间序列</h3>
+        <div class="btn-group" role="tablist">
+          <button class="btn btn-ghost btn-xs stats-range-btn" data-range="6" onclick="App.setStatsRange(6)">近 6h</button>
+          <button class="btn btn-ghost btn-xs stats-range-btn active" data-range="24" onclick="App.setStatsRange(24)">近 24h</button>
+          <button class="btn btn-ghost btn-xs stats-range-btn" data-range="72" onclick="App.setStatsRange(72)">近 72h</button>
+        </div>
+      </div>
       <div class="bars" id="stats-chart"></div>
     </div>
     <div class="section">
       <div class="section-header">
-        <div class="section-title">模型使用统计</div>
+        <div>
+          <div class="section-title">模型使用统计</div>
+          <div class="section-desc">按模型聚合：请求量、成功率、平均耗时与 p50 / p95 延迟分位数</div>
+        </div>
       </div>
       <div class="section-body tight">
         <div class="table-wrap">
           <table id="model-stats-table">
-            <thead><tr><th>模型</th><th>请求</th><th>成功</th><th>错误</th><th>成功率</th><th>平均耗时</th></tr></thead>
+            <thead><tr><th>模型</th><th>请求</th><th>成功</th><th>错误</th><th>成功率</th><th>平均</th><th>p50</th><th>p95</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-header">
+        <div>
+          <div class="section-title">账号维度统计</div>
+          <div class="section-desc">每个账号 ID 前 8 位的请求量与成功率</div>
+        </div>
+      </div>
+      <div class="section-body tight">
+        <div class="table-wrap">
+          <table id="account-stats-table">
+            <thead><tr><th>账号 ID</th><th>请求</th><th>成功</th><th>错误</th><th>成功率</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -1422,24 +1465,26 @@ window._firebaseOAuth = async function(provider) {
     </div>
     <div class="section" style="margin-top:24px">
       <div class="section-header">
-        <div class="section-title">模型身份注入</div>
+        <div>
+          <div class="section-title">模型身份注入</div>
+          <div class="section-desc">开启后在每个请求最前面注入一条系统提示词，覆盖 Cascade 自带的 Windsurf 身份；下面每个厂商的模板可自定义，保存后立即生效</div>
+        </div>
       </div>
       <div class="section-body">
-        <div class="section-desc" style="margin-bottom:12px">
-          开启后，在每个请求的上下文中注入一条系统提示词，让模型以请求的身份自称
-          （例如请求 <code>claude-opus-4.6</code> 时，模型会说自己是 Claude Opus 4.6，由 Anthropic 开发）。
-          覆盖 Cascade 内置的 Windsurf 身份。
-        </div>
-        <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;padding:12px;background:var(--surface-2);border-radius:var(--radius)">
           <label class="switch">
             <input type="checkbox" id="exp-identity-prompt" onchange="App.toggleExperimental('modelIdentityPrompt', this.checked)">
             <span class="switch-slider"></span>
           </label>
-          <div>
-            <div style="font-weight:500">启用模型身份注入</div>
-            <div class="text-sm text-muted">默认开启。支持 Anthropic / OpenAI / Google / DeepSeek / xAI 等厂商模型。</div>
+          <div style="flex:1">
+            <div style="font-weight:600">启用模型身份注入</div>
+            <div class="text-sm text-muted">默认开启；关闭后下面的模板不起作用</div>
           </div>
         </div>
+        <div class="section-desc" style="margin-bottom:10px">
+          每个厂商的模板可编辑，<code>{model}</code> 占位符会被替换成请求的模型名（例如 <code>claude-opus-4.6</code>）。
+        </div>
+        <div id="identity-prompts-editor" style="display:grid;gap:14px"></div>
       </div>
     </div>
   </section>
@@ -2436,32 +2481,78 @@ const App = {
   },
 
   // ─── Stats ───────────────────────────────────
+  statsRange: 24,
+
+  setStatsRange(hours) {
+    this.statsRange = hours;
+    document.querySelectorAll('.stats-range-btn').forEach(b => {
+      b.classList.toggle('active', Number(b.dataset.range) === hours);
+    });
+    this.loadStats();
+  },
+
   async loadStats() {
     const d = await this.api('GET', '/stats');
+    const totalReq = d.totalRequests || 0;
+    const successRate = totalReq > 0 ? ((d.successCount/totalReq)*100).toFixed(1) : '0.0';
+    const allP95 = Object.values(d.modelCounts || {})
+      .filter(m => m.p95Ms > 0).map(m => m.p95Ms);
+    const avgP95 = allP95.length ? Math.round(allP95.reduce((a,b)=>a+b,0) / allP95.length) : 0;
+    const uptimeSec = d.startedAt ? Math.floor((Date.now() - d.startedAt) / 1000) : 0;
+    const fmtUptime = s => s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s/60)}m` : s < 86400 ? `${(s/3600).toFixed(1)}h` : `${(s/86400).toFixed(1)}d`;
+
     document.getElementById('stats-cards').innerHTML = `
-      <div class="card info"><div class="card-header"><div class="card-title">总请求</div></div><div class="card-value">${d.totalRequests || 0}</div></div>
-      <div class="card success"><div class="card-header"><div class="card-title">成功</div></div><div class="card-value">${d.successCount || 0}</div></div>
-      <div class="card error"><div class="card-header"><div class="card-title">错误</div></div><div class="card-value">${d.errorCount || 0}</div></div>
-      <div class="card accent"><div class="card-header"><div class="card-title">成功率</div></div><div class="card-value">${d.totalRequests > 0 ? ((d.successCount/d.totalRequests)*100).toFixed(1) : 0}%</div></div>
+      <div class="card info"><div class="card-header"><div class="card-title">总请求</div></div><div class="card-value">${totalReq}</div><div class="card-sub">运行 ${fmtUptime(uptimeSec)}</div></div>
+      <div class="card success"><div class="card-header"><div class="card-title">成功</div></div><div class="card-value">${d.successCount || 0}</div><div class="card-sub">成功率 ${successRate}%</div></div>
+      <div class="card error"><div class="card-header"><div class="card-title">错误</div></div><div class="card-value">${d.errorCount || 0}</div><div class="card-sub">失败率 ${totalReq > 0 ? (100-Number(successRate)).toFixed(1) : '0.0'}%</div></div>
+      <div class="card accent"><div class="card-header"><div class="card-title">平均 p95 延迟</div></div><div class="card-value">${avgP95}<span style="font-size:14px;font-weight:400;margin-left:4px">ms</span></div><div class="card-sub">${allP95.length} 个模型</div></div>
     `;
+
     const models = d.modelCounts || {};
+    // sort by requests desc
+    const sortedModels = Object.entries(models).sort(([,a],[,b]) => b.requests - a.requests);
     const tbody = document.querySelector('#model-stats-table tbody');
-    tbody.innerHTML = Object.entries(models).map(([m, s]) => `
+    tbody.innerHTML = sortedModels.map(([m, s]) => {
+      const rate = s.requests > 0 ? ((s.success/s.requests)*100).toFixed(1) : '0.0';
+      const rateColor = Number(rate) >= 95 ? 'var(--success)' : Number(rate) >= 80 ? 'var(--warning, #f59e0b)' : 'var(--error)';
+      return `
       <tr>
-        <td><code>${m}</code></td>
+        <td><code>${this.esc(m)}</code></td>
         <td>${s.requests}</td>
         <td style="color:var(--success)">${s.success}</td>
         <td style="color:${s.errors > 0 ? 'var(--error)' : 'inherit'}">${s.errors}</td>
-        <td>${s.requests > 0 ? ((s.success/s.requests)*100).toFixed(1) : 0}%</td>
-        <td class="text-sm">${s.requests > 0 ? Math.round(s.totalMs/s.requests) : 0} ms</td>
-      </tr>
-    `).join('') || '<tr class="empty-row"><td colspan="6">暂无请求数据</td></tr>';
+        <td style="color:${rateColor};font-weight:600">${rate}%</td>
+        <td class="text-sm">${s.avgMs || 0} ms</td>
+        <td class="text-sm">${s.p50Ms || 0} ms</td>
+        <td class="text-sm">${s.p95Ms || 0} ms</td>
+      </tr>`;
+    }).join('') || '<tr class="empty-row"><td colspan="8">暂无请求数据</td></tr>';
 
-    const buckets = (d.hourlyBuckets || []).slice(-24);
+    // Account breakdown
+    const accounts = d.accountCounts || {};
+    const sortedAccts = Object.entries(accounts).sort(([,a],[,b]) => b.requests - a.requests);
+    const acctBody = document.querySelector('#account-stats-table tbody');
+    if (acctBody) {
+      acctBody.innerHTML = sortedAccts.map(([aid, s]) => {
+        const rate = s.requests > 0 ? ((s.success/s.requests)*100).toFixed(1) : '0.0';
+        return `<tr>
+          <td><code>${this.esc(aid)}</code></td>
+          <td>${s.requests}</td>
+          <td style="color:var(--success)">${s.success}</td>
+          <td style="color:${s.errors > 0 ? 'var(--error)' : 'inherit'}">${s.errors}</td>
+          <td>${rate}%</td>
+        </tr>`;
+      }).join('') || '<tr class="empty-row"><td colspan="5">暂无账号级请求数据</td></tr>';
+    }
+
+    // Time-range chart
+    const buckets = (d.hourlyBuckets || []).slice(-this.statsRange);
     const maxReq = Math.max(1, ...buckets.map(b => b.requests));
     document.getElementById('stats-chart').innerHTML = buckets.map(b => {
       const h = Math.max(2, (b.requests / maxReq) * 100);
-      return `<div class="bar-wrap"><div class="bar ${b.errors > 0 ? 'has-errors' : ''}" style="height:${h}%" title="${b.requests} 请求 / ${b.errors} 错误"></div><div class="bar-label">${new Date(b.hour).getHours()}时</div></div>`;
+      const errRate = b.requests > 0 ? ((b.errors / b.requests) * 100).toFixed(0) : '0';
+      const hr = new Date(b.hour).getHours();
+      return `<div class="bar-wrap"><div class="bar ${b.errors > 0 ? 'has-errors' : ''}" style="height:${h}%" title="${b.hour} · ${b.requests} 请求 · ${b.errors} 错误 (${errRate}%)"></div><div class="bar-label">${hr}时</div></div>`;
     }).join('') || '<div class="text-sm text-dim" style="text-align:center;width:100%;padding:30px">暂无数据</div>';
 
     this.poll('stats', () => this.loadStats(), 30000);
@@ -2476,6 +2567,19 @@ const App = {
   },
 
   // ─── Experimental features ───────────────────
+  PROVIDER_LABELS: {
+    anthropic: 'Anthropic · Claude',
+    openai: 'OpenAI · GPT / o 系列',
+    google: 'Google · Gemini',
+    deepseek: 'DeepSeek',
+    xai: 'xAI · Grok',
+    alibaba: 'Alibaba · Qwen',
+    moonshot: 'Moonshot · Kimi',
+    zhipu: 'Zhipu · GLM',
+    minimax: 'MiniMax',
+    windsurf: 'Windsurf · SWE',
+  },
+
   async loadExperimental() {
     const d = await this.api('GET', '/experimental');
     const cb = document.getElementById('exp-cascade-reuse');
@@ -2500,6 +2604,85 @@ const App = {
         <div class="card-sub">过期 ${pool.expired || 0} · 淘汰 ${pool.evictions || 0}</div>
       </div>
     `;
+
+    // Identity prompts editor
+    const ip = await this.api('GET', '/identity-prompts');
+    this._identityDefaults = ip.defaults || {};
+    const holder = document.getElementById('identity-prompts-editor');
+    if (holder) {
+      const prompts = ip.prompts || {};
+      holder.innerHTML = Object.entries(prompts).map(([provider, text]) => {
+        const label = this.PROVIDER_LABELS[provider] || provider;
+        const isDefault = text === this._identityDefaults[provider];
+        return `
+          <div style="border:1px solid var(--border);border-radius:var(--radius);padding:12px;background:var(--surface)">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+              <div style="display:flex;align-items:center;gap:8px">
+                <code style="color:var(--accent);font-weight:600">${provider}</code>
+                <span class="text-sm text-muted">${label}</span>
+                ${isDefault ? '' : '<span class="text-xs" style="background:var(--accent);color:#fff;padding:2px 6px;border-radius:3px">已自定义</span>'}
+              </div>
+              <div class="btn-group">
+                <button class="btn btn-ghost btn-xs" onclick="App.resetIdentityPrompt('${provider}')" ${isDefault ? 'disabled' : ''}>恢复默认</button>
+                <button class="btn btn-primary btn-xs" onclick="App.saveIdentityPrompt('${provider}')">保存</button>
+              </div>
+            </div>
+            <textarea id="id-prompt-${provider}" class="input" rows="3" style="width:100%;font-family:var(--mono);font-size:12px;resize:vertical;line-height:1.5">${this.esc(text)}</textarea>
+          </div>
+        `;
+      }).join('');
+    }
+  },
+
+  async saveIdentityPrompt(provider) {
+    const ta = document.getElementById(`id-prompt-${provider}`);
+    if (!ta) return;
+    const v = ta.value.trim();
+    if (!v) return this.toast('模板不能为空', 'error');
+    if (!v.includes('{model}')) {
+      const ok = await this.confirm('缺少 {model} 占位符', '保存后该厂商的模型名将无法被替换进提示词。确定继续？', { okText: '仍然保存' });
+      if (!ok) return;
+    }
+    await this.api('PUT', '/identity-prompts', { [provider]: v });
+    this.toast(`${provider} 模板已保存`, 'success');
+    this.loadExperimental();
+  },
+
+  async resetIdentityPrompt(provider) {
+    const ok = await this.confirm('恢复默认', `确定将 ${provider} 模板恢复到默认？`, { okText: '恢复' });
+    if (!ok) return;
+    await this.api('DELETE', `/identity-prompts/${provider}`);
+    this.toast(`${provider} 已恢复默认`, 'success');
+    this.loadExperimental();
+  },
+
+  async testLoginProxy() {
+    const host = document.getElementById('wl-proxy-host').value.trim();
+    const port = parseInt(document.getElementById('wl-proxy-port').value) || 0;
+    if (!host || !port) return this.toast('请先填主机和端口', 'error');
+    const type = document.getElementById('wl-proxy-type').value;
+    const username = document.getElementById('wl-proxy-user').value.trim();
+    const password = document.getElementById('wl-proxy-pass').value;
+    const btn = document.getElementById('wl-proxy-test-btn');
+    const out = document.getElementById('wl-proxy-test-result');
+    btn.disabled = true;
+    out.textContent = '测试中...';
+    out.style.color = 'var(--text-muted)';
+    try {
+      const r = await this.api('POST', '/test-proxy', { host, port, username, password, type });
+      if (r.ok) {
+        out.textContent = `✓ 连通成功 出口 IP ${r.egressIp} · 耗时 ${r.latencyMs}ms`;
+        out.style.color = 'var(--success)';
+      } else {
+        out.textContent = `✗ 失败: ${r.error} · ${r.latencyMs}ms`;
+        out.style.color = 'var(--error)';
+      }
+    } catch (e) {
+      out.textContent = `✗ ${e.message}`;
+      out.style.color = 'var(--error)';
+    } finally {
+      btn.disabled = false;
+    }
   },
 
   async toggleExperimental(key, enabled) {

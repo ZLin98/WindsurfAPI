@@ -15,6 +15,19 @@ import { log } from './config.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FILE = resolve(__dirname, '..', 'runtime-config.json');
 
+export const DEFAULT_IDENTITY_PROMPTS = {
+  anthropic: 'You are {model}, a large language model created by Anthropic. You are helpful, harmless, and honest. When asked about your identity or which model you are, you respond that you are {model}, made by Anthropic.',
+  openai:    'You are {model}, a large language model created by OpenAI. When asked about your identity, you respond that you are {model}, made by OpenAI.',
+  google:    'You are {model}, a large language model created by Google. When asked about your identity, you respond that you are {model}, made by Google.',
+  deepseek:  'You are {model}, a large language model created by DeepSeek. When asked about your identity, you respond that you are {model}, made by DeepSeek.',
+  xai:       'You are {model}, a large language model created by xAI. When asked about your identity, you respond that you are {model}, made by xAI.',
+  alibaba:   'You are {model}, a large language model created by Alibaba. When asked about your identity, you respond that you are {model}, made by Alibaba.',
+  moonshot:  'You are {model}, a large language model created by Moonshot AI. When asked about your identity, you respond that you are {model}, made by Moonshot AI.',
+  zhipu:     'You are {model}, a large language model created by Zhipu AI. When asked about your identity, you respond that you are {model}, made by Zhipu AI.',
+  minimax:   'You are {model}, a large language model created by MiniMax. When asked about your identity, you respond that you are {model}, made by MiniMax.',
+  windsurf:  'You are {model}, a coding assistant model by Windsurf. When asked about your identity, you respond that you are {model}, made by Windsurf.',
+};
+
 const DEFAULTS = {
   experimental: {
     // Reuse Cascade cascade_id across multi-turn requests when the history
@@ -31,6 +44,9 @@ const DEFAULTS = {
     // capacity. Adds one network round-trip per attempt so off by default.
     preflightRateLimit: false,
   },
+  // Per-provider identity prompt templates. Use {model} as the model-name
+  // placeholder. Edits from the dashboard are persisted here.
+  identityPrompts: { ...DEFAULT_IDENTITY_PROMPTS },
 };
 
 function deepMerge(base, override) {
@@ -90,4 +106,35 @@ export function setExperimental(patch) {
   }
   persist();
   return getExperimental();
+}
+
+export function getIdentityPrompts() {
+  return { ...DEFAULT_IDENTITY_PROMPTS, ...(_state.identityPrompts || {}) };
+}
+
+export function getIdentityPromptFor(provider) {
+  const all = getIdentityPrompts();
+  return all[provider] || null;
+}
+
+export function setIdentityPrompts(patch) {
+  if (!patch || typeof patch !== 'object') return getIdentityPrompts();
+  const current = _state.identityPrompts || {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (typeof v !== 'string') continue;
+    current[k] = v.trim();
+  }
+  _state.identityPrompts = current;
+  persist();
+  return getIdentityPrompts();
+}
+
+export function resetIdentityPrompt(provider) {
+  if (provider && _state.identityPrompts) {
+    delete _state.identityPrompts[provider];
+  } else {
+    _state.identityPrompts = {};
+  }
+  persist();
+  return getIdentityPrompts();
 }

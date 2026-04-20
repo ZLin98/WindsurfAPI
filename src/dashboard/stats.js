@@ -50,15 +50,20 @@ export function recordRequest(model, success, durationMs, accountId) {
   if (success) _state.successCount++;
   else _state.errorCount++;
 
-  // Per-model stats
+  // Per-model stats (includes a small ring buffer for p50/p95 latency)
   if (!_state.modelCounts[model]) {
-    _state.modelCounts[model] = { requests: 0, success: 0, errors: 0, totalMs: 0 };
+    _state.modelCounts[model] = { requests: 0, success: 0, errors: 0, totalMs: 0, recentMs: [] };
   }
   const mc = _state.modelCounts[model];
   mc.requests++;
   if (success) mc.success++;
   else mc.errors++;
   mc.totalMs += durationMs;
+  if (!mc.recentMs) mc.recentMs = [];
+  if (durationMs > 0) {
+    mc.recentMs.push(durationMs);
+    if (mc.recentMs.length > 200) mc.recentMs.shift();
+  }
 
   // Per-account stats
   if (accountId) {
@@ -87,9 +92,29 @@ export function recordRequest(model, success, durationMs, accountId) {
   scheduleSave();
 }
 
-/** Get all stats. */
+function percentile(sortedArr, p) {
+  if (!sortedArr.length) return 0;
+  const idx = Math.min(sortedArr.length - 1, Math.floor(sortedArr.length * p));
+  return sortedArr[idx];
+}
+
+/** Get all stats, with computed latency percentiles per model. */
 export function getStats() {
-  return { ..._state };
+  const out = { ..._state };
+  out.modelCounts = {};
+  for (const [m, s] of Object.entries(_state.modelCounts)) {
+    const sorted = (s.recentMs || []).slice().sort((a, b) => a - b);
+    out.modelCounts[m] = {
+      requests: s.requests,
+      success: s.success,
+      errors: s.errors,
+      totalMs: s.totalMs,
+      avgMs: s.requests > 0 ? Math.round(s.totalMs / s.requests) : 0,
+      p50Ms: Math.round(percentile(sorted, 0.5)),
+      p95Ms: Math.round(percentile(sorted, 0.95)),
+    };
+  }
+  return out;
 }
 
 /** Reset all stats. */
