@@ -46,10 +46,23 @@ const VERSION_INFO = (() => {
   return { version: pkgVersion, commit, commitMessage, commitDate, branch };
 })();
 
+// 10 MB is way above any realistic chat-completions payload while still
+// bounding worst-case memory from a malicious/broken client.
+const MAX_BODY_SIZE = 10 * 1024 * 1024;
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on('data', c => chunks.push(c));
+    let size = 0;
+    req.on('data', c => {
+      size += c.length;
+      if (size > MAX_BODY_SIZE) {
+        req.destroy();
+        reject(Object.assign(new Error('Request body too large'), { statusCode: 413 }));
+        return;
+      }
+      chunks.push(c);
+    });
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
     req.on('error', reject);
   });

@@ -9,7 +9,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, renameSync, unlinkSync } from 'fs';
 import { config, log } from './config.js';
 import { getEffectiveProxy } from './dashboard/proxy-config.js';
 import { getTierModels, getModelKeysByEnum, MODELS } from './models.js';
@@ -48,6 +48,7 @@ let _savePending = false;
 function saveAccounts() {
   if (_saveInFlight) { _savePending = true; return; }
   _saveInFlight = true;
+  const tempFile = ACCOUNTS_FILE + '.tmp';
   try {
     const data = accounts.map(a => ({
       id: a.id, email: a.email, apiKey: a.apiKey,
@@ -62,9 +63,14 @@ function saveAccounts() {
       userStatus: a.userStatus || null,
       userStatusLastFetched: a.userStatusLastFetched || 0,
     }));
-    writeFileSync(ACCOUNTS_FILE, JSON.stringify(data, null, 2));
+    // Atomic write: write to .tmp then rename so a crash mid-write can't
+    // leave accounts.json truncated/corrupt. Node's renameSync is atomic
+    // on POSIX and replaces the target on Windows (fs.rename behavior).
+    writeFileSync(tempFile, JSON.stringify(data, null, 2));
+    renameSync(tempFile, ACCOUNTS_FILE);
   } catch (e) {
     log.error('Failed to save accounts:', e.message);
+    try { unlinkSync(tempFile); } catch {}
   } finally {
     _saveInFlight = false;
     if (_savePending) { _savePending = false; setImmediate(saveAccounts); }

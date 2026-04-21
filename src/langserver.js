@@ -13,6 +13,7 @@ import { existsSync } from 'fs';
 import http2 from 'http2';
 import net from 'net';
 import { log } from './config.js';
+import { closeSessionForPort } from './grpc.js';
 
 const DEFAULT_BINARY = '/opt/windsurf/language_server_linux_x64';
 const DEFAULT_PORT = 42100;
@@ -21,13 +22,22 @@ const DEFAULT_API_URL = 'https://server.self-serve.windsurf.com';
 
 // Pool: key -> { process, port, csrfToken, proxy, startedAt, ready }
 const _pool = new Map();
+// In-flight Promise map so two concurrent ensureLs(proxy) calls for the
+// same key share one spawn + readiness wait. Without this, both callers
+// would each spawn an LS process, race on the port, and leave an orphan.
+const _pending = new Map();
 let _nextPort = DEFAULT_PORT + 1;
 let _binaryPath = DEFAULT_BINARY;
 let _apiServerUrl = DEFAULT_API_URL;
 
 function proxyKey(proxy) {
   if (!proxy || !proxy.host) return 'default';
-  return `px_${proxy.host.replace(/\./g, '_')}_${proxy.port}`;
+  // Sanitize to [A-Za-z0-9_] — the key flows into a filesystem path
+  // (`/opt/windsurf/data/${key}`) and a shell-quoted mkdir, so strip any
+  // special character that could slip past execSync's naive quoting.
+  const safeHost = proxy.host.replace(/[^a-zA-Z0-9]/g, '_');
+  const safePort = String(proxy.port || 8080).replace(/[^0-9]/g, '');
+  return `px_${safeHost}_${safePort}`;
 }
 
 function proxyUrl(proxy) {
@@ -75,110 +85,130 @@ export async function ensureLs(proxy = null) {
   const existing = _pool.get(key);
   if (existing && existing.ready) return existing;
 
-  const isDefault = key === 'default';
-  const port = isDefault ? DEFAULT_PORT : _nextPort++;
+  // Coalesce concurrent callers onto a single spawn. The chat handlers
+  // call ensureLs(acct.proxy) on every request; before this guard, a burst
+  // of requests for a never-seen proxy would spawn N LS processes that
+  // all tried to bind the same _nextPort.
+  const pending = _pending.get(key);
+  if (pending) return pending;
 
-  // If something is already listening on the default port (e.g. leftover from
-  // a previous crashed run), adopt it rather than fight for the port.
-  if (isDefault && await isPortInUse(port)) {
-    log.info(`LS default port ${port} already in use — adopting existing instance`);
+  const promise = (async () => {
+    const isDefault = key === 'default';
+    const port = isDefault ? DEFAULT_PORT : _nextPort++;
+
+    // If something is already listening on the default port (e.g. leftover
+    // from a previous crashed run), adopt it rather than fight for the port.
+    if (isDefault && await isPortInUse(port)) {
+      log.info(`LS default port ${port} already in use — adopting existing instance`);
+      const entry = {
+        process: null, port, csrfToken: DEFAULT_CSRF,
+        proxy: null, startedAt: Date.now(), ready: true,
+        workspaceInit: null, sessionId: null,
+      };
+      _pool.set(key, entry);
+      return entry;
+    }
+
+    const dataDir = `/opt/windsurf/data/${key}`;
+    try { execSync(`mkdir -p ${dataDir}/db`, { stdio: 'ignore' }); } catch {}
+
+    const args = [
+      `--api_server_url=${_apiServerUrl}`,
+      `--server_port=${port}`,
+      `--csrf_token=${DEFAULT_CSRF}`,
+      `--register_user_url=https://api.codeium.com/register_user/`,
+      `--codeium_dir=${dataDir}`,
+      `--database_dir=${dataDir}/db`,
+      '--enable_local_search=false',
+      '--enable_index_service=false',
+      '--enable_lsp=false',
+      '--detect_proxy=false',
+    ];
+
+    const env = { ...process.env, HOME: '/root' };
+    const pUrl = proxyUrl(proxy);
+    if (pUrl) {
+      env.HTTPS_PROXY = pUrl;
+      env.HTTP_PROXY = pUrl;
+      env.https_proxy = pUrl;
+      env.http_proxy = pUrl;
+    }
+
+    // One-shot readable warning when the LS binary is missing — the generic
+    // ENOENT from spawn leaves users guessing which file is expected.
+    if (!existsSync(_binaryPath)) {
+      log.error(
+        `Language server binary not found at ${_binaryPath}. ` +
+        `Install it with:  bash install-ls.sh  (or set LS_BINARY_PATH env var)`
+      );
+    }
+
+    log.info(`Starting LS instance key=${key} port=${port} proxy=${pUrl || 'none'}`);
+
+    const proc = spawn(_binaryPath, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env,
+    });
+
+    proc.stdout.on('data', (data) => {
+      const lines = data.toString().trim().split('\n');
+      for (const line of lines) {
+        if (!line) continue;
+        if (/ERROR|error/.test(line)) log.error(`[LS:${key}] ${line}`);
+        else log.debug(`[LS:${key}] ${line}`);
+      }
+    });
+    proc.stderr.on('data', (data) => {
+      const line = data.toString().trim();
+      if (line) log.debug(`[LS:${key}:err] ${line}`);
+    });
+    proc.on('exit', (code, signal) => {
+      log.warn(`LS instance ${key} exited: code=${code} signal=${signal}`);
+      const gone = _pool.get(key);
+      _pool.delete(key);
+      if (gone?.port) {
+        // Drop the pooled HTTP/2 session so the next request to the
+        // replacement LS opens a fresh one instead of writing into a
+        // dead socket (grpc.js caches one session per port).
+        closeSessionForPort(gone.port);
+        import('./conversation-pool.js').then(m => m.invalidateFor({ lsPort: gone.port })).catch(() => {});
+      }
+    });
+    proc.on('error', (err) => {
+      log.error(`LS instance ${key} spawn error: ${err.message}`);
+      _pool.delete(key);
+    });
+
     const entry = {
-      process: null, port, csrfToken: DEFAULT_CSRF,
-      proxy: null, startedAt: Date.now(), ready: true,
-      workspaceInit: null, sessionId: null,
+      process: proc, port, csrfToken: DEFAULT_CSRF,
+      proxy, startedAt: Date.now(), ready: false,
+      // One-shot Cascade workspace init promise. cascadeChat() awaits this so
+      // the heavy InitializePanelState / AddTrackedWorkspace / UpdateWorkspaceTrust
+      // trio only runs once per LS lifetime instead of once per request.
+      workspaceInit: null,
+      sessionId: null,
     };
     _pool.set(key, entry);
+
+    try {
+      await waitPortReady(port, 25000);
+      entry.ready = true;
+      log.info(`LS instance ${key} ready on port ${port}`);
+    } catch (err) {
+      log.error(`LS instance ${key} failed to become ready: ${err.message}`);
+      try { proc.kill('SIGKILL'); } catch {}
+      _pool.delete(key);
+      throw err;
+    }
     return entry;
-  }
+  })();
 
-  const dataDir = `/opt/windsurf/data/${key}`;
-  try { execSync(`mkdir -p ${dataDir}/db`, { stdio: 'ignore' }); } catch {}
-
-  const args = [
-    `--api_server_url=${_apiServerUrl}`,
-    `--server_port=${port}`,
-    `--csrf_token=${DEFAULT_CSRF}`,
-    `--register_user_url=https://api.codeium.com/register_user/`,
-    `--codeium_dir=${dataDir}`,
-    `--database_dir=${dataDir}/db`,
-    '--enable_local_search=false',
-    '--enable_index_service=false',
-    '--enable_lsp=false',
-    '--detect_proxy=false',
-  ];
-
-  const env = { ...process.env, HOME: '/root' };
-  const pUrl = proxyUrl(proxy);
-  if (pUrl) {
-    env.HTTPS_PROXY = pUrl;
-    env.HTTP_PROXY = pUrl;
-    env.https_proxy = pUrl;
-    env.http_proxy = pUrl;
-  }
-
-  // One-shot readable warning when the LS binary is missing — the generic
-  // ENOENT from spawn leaves users guessing which file is expected.
-  if (!existsSync(_binaryPath)) {
-    log.error(
-      `Language server binary not found at ${_binaryPath}. ` +
-      `Install it with:  bash install-ls.sh  (or set LS_BINARY_PATH env var)`
-    );
-  }
-
-  log.info(`Starting LS instance key=${key} port=${port} proxy=${pUrl || 'none'}`);
-
-  const proc = spawn(_binaryPath, args, {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env,
-  });
-
-  proc.stdout.on('data', (data) => {
-    const lines = data.toString().trim().split('\n');
-    for (const line of lines) {
-      if (!line) continue;
-      if (/ERROR|error/.test(line)) log.error(`[LS:${key}] ${line}`);
-      else log.debug(`[LS:${key}] ${line}`);
-    }
-  });
-  proc.stderr.on('data', (data) => {
-    const line = data.toString().trim();
-    if (line) log.debug(`[LS:${key}:err] ${line}`);
-  });
-  proc.on('exit', (code, signal) => {
-    log.warn(`LS instance ${key} exited: code=${code} signal=${signal}`);
-    const gone = _pool.get(key);
-    _pool.delete(key);
-    if (gone?.port) {
-      import('./conversation-pool.js').then(m => m.invalidateFor({ lsPort: gone.port })).catch(() => {});
-    }
-  });
-  proc.on('error', (err) => {
-    log.error(`LS instance ${key} spawn error: ${err.message}`);
-    _pool.delete(key);
-  });
-
-  const entry = {
-    process: proc, port, csrfToken: DEFAULT_CSRF,
-    proxy, startedAt: Date.now(), ready: false,
-    // One-shot Cascade workspace init promise. cascadeChat() awaits this so
-    // the heavy InitializePanelState / AddTrackedWorkspace / UpdateWorkspaceTrust
-    // trio only runs once per LS lifetime instead of once per request.
-    workspaceInit: null,
-    sessionId: null,
-  };
-  _pool.set(key, entry);
-
+  _pending.set(key, promise);
   try {
-    await waitPortReady(port, 25000);
-    entry.ready = true;
-    log.info(`LS instance ${key} ready on port ${port}`);
-  } catch (err) {
-    log.error(`LS instance ${key} failed to become ready: ${err.message}`);
-    try { proc.kill('SIGKILL'); } catch {}
-    _pool.delete(key);
-    throw err;
+    return await promise;
+  } finally {
+    _pending.delete(key);
   }
-  return entry;
 }
 
 /**

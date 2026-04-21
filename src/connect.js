@@ -109,9 +109,15 @@ export class StreamingFrameParser {
 
   /** Drain all complete frames. Returns [{ flags, isEndStream, payload }]. */
   drain() {
+    // Guard against malformed upstream frames that advertise absurd lengths —
+    // without this, Buffer.concat() will happily try to allocate gigabytes.
+    const MAX_FRAME_SIZE = 16 * 1024 * 1024;
     const frames = [];
     while (this.buffer.length >= 5) {
       const len = this.buffer.readUInt32BE(1);
+      if (len > MAX_FRAME_SIZE) {
+        throw new Error(`HTTP/2 frame size ${len} exceeds ${MAX_FRAME_SIZE}`);
+      }
       if (this.buffer.length < 5 + len) break;
 
       const flags = this.buffer[0];
