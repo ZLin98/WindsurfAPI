@@ -146,7 +146,11 @@ export async function ensureLs(proxy = null) {
       '--detect_proxy=false',
     ];
 
-    const env = { ...process.env, HOME: '/root' };
+    // Fall back to /root only when HOME isn't already set (e.g. a systemd
+    // unit without User=). VPS deployments already have HOME in env; forcing
+    // /root broke macOS/Windows dev runs where LS expects the real $HOME.
+    const env = { ...process.env };
+    if (!env.HOME) env.HOME = '/root';
     const pUrl = proxyUrl(proxy);
     if (pUrl) {
       env.HTTPS_PROXY = pUrl;

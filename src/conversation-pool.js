@@ -180,3 +180,8 @@ export function poolClear() {
   _pool.clear();
   return n;
 }
+
+// Background prune — without this, expired entries accumulate when there
+// are no checkin() calls for a while (e.g. a quiet weekend). .unref() so
+// this timer never holds the process open past real work.
+setInterval(() => prune(Date.now()), 5 * 60 * 1000).unref();
