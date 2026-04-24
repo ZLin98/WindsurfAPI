@@ -266,7 +266,7 @@ export class WindsurfClient {
    * @param {object} opts - { onChunk, onEnd, onError }
    */
   async cascadeChat(messages, modelEnum, modelUid, opts = {}) {
-    let { onChunk, onEnd, onError, signal, reuseEntry, toolPreamble } = opts;
+    let { onChunk, onEnd, onError, signal, reuseEntry, toolPreamble, displayModel } = opts;
     const aborted = () => signal?.aborted;
     const inputChars = messages.reduce((n, m) => n + contentToString(m?.content).length, 0);
 
