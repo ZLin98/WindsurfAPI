@@ -1596,8 +1596,7 @@ window._firebaseOAuth = async function(provider) {
       </div>
       <div class="section-body">
         <div class="section-desc" style="margin-bottom:12px" data-i18n="section.cascadeReuse.desc">多轮对话时复用同一个 cascade_id，只把最新一条 user 消息发给 Windsurf，让服务端维持上下文缓存。命中时可显著降低 TTFB 与上传体积；未命中或账号/LS 变更会自动回退到新会话。需要客户端保留完整历史并按顺序追加（如 new-api、OpenWebUI）。</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:16px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;padding:12px;background:var(--surface-2);border-radius:var(--radius)">
           <label class="switch">
             <input type="checkbox" id="exp-cascade-reuse" onchange="App.toggleExperimental('cascadeConversationReuse', this.checked)">
             <span class="switch-slider"></span>
