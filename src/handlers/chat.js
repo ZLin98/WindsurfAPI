@@ -313,6 +313,45 @@ export function applyJsonResponseHint(messages, responseFormat) {
   return out;
 }
 
+function hasClaudeCodeMetadata(body) {
+  const userId = body?.metadata?.user_id;
+  if (typeof userId !== 'string' || !userId) return false;
+  try {
+    const parsed = JSON.parse(userId);
+    return !!(parsed && typeof parsed === 'object' && (
+      parsed.device_id || parsed.deviceId
+      || parsed.session_id || parsed.sessionId
+      || parsed.account_uuid || parsed.accountUuid
+    ));
+  } catch {
+    return false;
+  }
+}
+
+export function isClaudeCodeLikeRequest(body = {}, messages = body?.messages || []) {
+  if (hasClaudeCodeMetadata(body)) return true;
+  const systemText = (Array.isArray(messages) ? messages : [])
+    .filter(m => m?.role === 'system')
+    .map(m => textFromMessageContent(m.content))
+    .join('\n');
+  return /Anthropic's official CLI for Claude|Claude Code|cc_version=|<env>|content_block|tool_use/i.test(systemText);
+}
+
+export function jsonModeDecision(body = {}, messages = body?.messages || []) {
+  const responseFormat = body?.response_format;
+  const explicitJsonRequested = isExplicitJsonRequested(messages);
+  const suppressClaudeCodeJson = isClaudeCodeLikeRequest(body, messages)
+    && process.env.CLAUDE_CODE_OUTPUT_FORMAT_JSON !== '1';
+  const responseFormatJson = responseFormat?.type === 'json_object' || responseFormat?.type === 'json_schema';
+  return {
+    explicitJsonRequested,
+    responseFormatJson,
+    suppressClaudeCodeJson,
+    wantJson: !suppressClaudeCodeJson && (responseFormatJson || explicitJsonRequested),
+    responseFormat: suppressClaudeCodeJson ? null : responseFormat,
+  };
+}
+
 const CASCADE_REUSE_STRICT = process.env.CASCADE_REUSE_STRICT === '1';
 const CASCADE_REUSE_STRICT_RETRY_MS = (() => {
   const n = parseInt(process.env.CASCADE_REUSE_STRICT_RETRY_MS || '', 10);
@@ -821,10 +860,13 @@ export async function handleChatCompletions(body, context = {}) {
     }
   }
 
-  const explicitJson = isExplicitJsonRequested(messages);
-  const wantJson = response_format?.type === 'json_object' || response_format?.type === 'json_schema' || explicitJson;
+  const jsonMode = jsonModeDecision({ ...body, response_format }, messages);
+  const wantJson = jsonMode.wantJson;
+  if (jsonMode.suppressClaudeCodeJson && (jsonMode.responseFormatJson || jsonMode.explicitJsonRequested)) {
+    log.info(`Chat[${reqId}]: suppressed proxy JSON mode for Claude Code request`);
+  }
   if (wantJson) {
-    messages = applyJsonResponseHint(messages, response_format);
+    messages = applyJsonResponseHint(messages, jsonMode.responseFormat);
   }
 
   const modelKey = resolveModel(reqModel || config.defaultModel);

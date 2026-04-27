@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { annotateRiskyReadToolResult, extractCallerSubKey, handleMessages } from '../src/handlers/messages.js';
-import { applyJsonResponseHint, extractRequestedJsonKeys, isExplicitJsonRequested, stabilizeJsonPayload } from '../src/handlers/chat.js';
+import { applyJsonResponseHint, extractRequestedJsonKeys, isExplicitJsonRequested, jsonModeDecision, stabilizeJsonPayload } from '../src/handlers/chat.js';
 
 describe('Anthropic messages request translation', () => {
   afterEach(() => {
@@ -404,6 +404,30 @@ describe('Anthropic messages request translation', () => {
       { role: 'assistant', content: '{"name":"windsurf-api","version":"2.0.11"}' },
       { role: 'user', content: 'Now explain the change in normal prose.' },
     ]), false);
+  });
+
+  it('does not let Claude Code requests force proxy JSON mode from text hints', () => {
+    const old = process.env.CLAUDE_CODE_OUTPUT_FORMAT_JSON;
+    delete process.env.CLAUDE_CODE_OUTPUT_FORMAT_JSON;
+    const messages = [
+      { role: 'system', content: "You are Claude Code, Anthropic's official CLI for Claude." },
+      { role: 'user', content: 'Return only compact JSON with exact keys diagnosis, root_cause and fix.' },
+    ];
+    try {
+      assert.equal(isExplicitJsonRequested(messages), true);
+
+      const decision = jsonModeDecision({
+        model: 'claude-sonnet-4.6',
+        messages,
+        response_format: { type: 'json_schema', json_schema: { schema: { type: 'object' } } },
+      }, messages);
+
+      assert.equal(decision.suppressClaudeCodeJson, true);
+      assert.equal(decision.wantJson, false);
+    } finally {
+      if (old === undefined) delete process.env.CLAUDE_CODE_OUTPUT_FORMAT_JSON;
+      else process.env.CLAUDE_CODE_OUTPUT_FORMAT_JSON = old;
+    }
   });
 
   it('extracts explicitly requested final JSON keys', () => {

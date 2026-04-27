@@ -17,6 +17,31 @@ EXAFUNCTION_API='https://api.github.com/repos/Exafunction/codeium/releases/lates
 log() { echo -e "\033[1;34m==>\033[0m $*"; }
 err() { echo -e "\033[1;31m!!\033[0m  $*" >&2; }
 
+file_size() {
+  stat --format=%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || echo 0
+}
+
+download_to_target() {
+  local url="$1"
+  local target="$2"
+  local min_bytes="${MIN_LS_BYTES:-1000000}"
+  local tmp="${target}.tmp.$$"
+  rm -f "$tmp"
+  if ! curl -fL --progress-bar -o "$tmp" "$url"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  local bytes
+  bytes="$(file_size "$tmp")"
+  if [[ "${bytes:-0}" -lt "$min_bytes" ]]; then
+    rm -f "$tmp"
+    err "Downloaded file is too small (${bytes} bytes): $url"
+    return 1
+  fi
+  mv -f "$tmp" "$target"
+  chmod +x "$target"
+}
+
 # ─── Platform detection ────────────────────────────────
 os="$(uname -s)"
 arch="$(uname -m)"
@@ -59,12 +84,12 @@ elif [[ $# -gt 0 && "$1" != "--url" && "$1" != "--file" && -f "$1" ]]; then
 elif [[ $# -ge 2 && "$1" == "--url" ]]; then
   url="$2"
   log "Downloading from: $url"
-  curl -fL --progress-bar -o "$TARGET" "$url"
+  download_to_target "$url" "$TARGET"
 else
   # Try our own GitHub release first (newer than Exafunction)
   our_url="${OUR_RELEASE}/${ASSET}"
   log "Trying WindsurfAPI release: $our_url"
-  if curl -fL --progress-bar -o "$TARGET" "$our_url" 2>/dev/null; then
+  if download_to_target "$our_url" "$TARGET" 2>/dev/null; then
     log "Downloaded from WindsurfAPI release"
   else
     log "Not found in our release, falling back to Exafunction..."
@@ -83,11 +108,16 @@ else
       exit 1
     fi
     log "Downloading: $url"
-    curl -fL --progress-bar -o "$TARGET" "$url"
+    download_to_target "$url" "$TARGET"
   fi
 fi
 
 chmod +x "$TARGET"
+bytes="$(file_size "$TARGET")"
+if [[ "${bytes:-0}" -lt "${MIN_LS_BYTES:-1000000}" ]]; then
+  err "Installed file is too small (${bytes} bytes): $TARGET"
+  exit 1
+fi
 size="$(du -h "$TARGET" | cut -f1)"
 if command -v sha256sum >/dev/null 2>&1; then
   sha="$(sha256sum "$TARGET" | cut -c1-16)"
