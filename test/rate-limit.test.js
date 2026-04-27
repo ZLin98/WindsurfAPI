@@ -6,6 +6,7 @@ import {
   getApiKey,
   getRpmStats,
   markRateLimited,
+  rememberAccountAffinity,
   releaseAccount,
   removeAccount,
   setAccountTier,
@@ -93,10 +94,45 @@ describe('rate-limit handling', () => {
     const now = Date.now();
 
     markRateLimited(account.apiKey, 1200, modelKey);
-    const until = getAccountList().find(a => a.id === account.id).modelRateLimits[modelKey];
+    const listed = getAccountList().find(a => a.id === account.id);
+    const until = listed.modelRateLimits[modelKey];
+    const detail = listed.modelRateLimitDetails.find(x => x.modelKey === modelKey);
 
     assert.ok(until >= now + 1000, `expected near-real expiry, got ${until - now}ms`);
     assert.ok(until <= now + 2500, `expected short cooldown, got ${until - now}ms`);
+    assert.equal(detail.modelKey, modelKey);
+    assert.equal(detail.resetAt, until);
+    assert.ok(detail.retryAfterMs >= 1000, `expected retryAfterMs >= 1000, got ${detail.retryAfterMs}`);
+    assert.ok(detail.retryAfterSec >= 1, `expected retryAfterSec >= 1, got ${detail.retryAfterSec}`);
+  });
+
+  it('prefers the previous successful account for the same caller and model', () => {
+    const first = addTestAccount('affinity-first');
+    const second = addTestAccount('affinity-second');
+    const modelKey = 'gemini-2.5-flash';
+
+    const warmedSecond = getApiKey([first.apiKey], modelKey);
+    assert.equal(warmedSecond.apiKey, second.apiKey);
+    releaseAccount(warmedSecond.apiKey);
+
+    rememberAccountAffinity(second.apiKey, modelKey, 'caller-sticky');
+    const selected = getApiKey([], modelKey, 'caller-sticky');
+
+    assert.equal(selected.apiKey, second.apiKey);
+    releaseAccount(selected.apiKey);
+  });
+
+  it('falls back from a sticky account when that model is cooling down', () => {
+    const first = addTestAccount('affinity-fallback-first');
+    const second = addTestAccount('affinity-fallback-second');
+    const modelKey = 'gemini-2.5-flash';
+
+    rememberAccountAffinity(second.apiKey, modelKey, 'caller-sticky-limited');
+    markRateLimited(second.apiKey, 60_000, modelKey);
+
+    const selected = getApiKey([], modelKey, 'caller-sticky-limited');
+    assert.equal(selected.apiKey, first.apiKey);
+    releaseAccount(selected.apiKey);
   });
 
   it('returns 429 when every eligible account is locally RPM-exhausted', async () => {

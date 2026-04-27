@@ -51,6 +51,38 @@ function positiveIntEnv(name, fallback) {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+const ACCOUNT_AFFINITY_TTL_MS = positiveIntEnv('ACCOUNT_AFFINITY_TTL_MS', 60 * 60 * 1000);
+const _accountAffinity = new Map();
+
+function accountAffinityKey(modelKey, callerKey) {
+  if (!modelKey || !callerKey) return '';
+  return `${callerKey}\0${modelKey}`;
+}
+
+function pruneAccountAffinity(now = Date.now()) {
+  for (const [key, entry] of _accountAffinity) {
+    if (!entry?.apiKey || now - (entry.lastUsed || 0) > ACCOUNT_AFFINITY_TTL_MS) {
+      _accountAffinity.delete(key);
+    }
+  }
+}
+
+function removeAccountAffinityForApiKey(apiKey) {
+  for (const [key, entry] of _accountAffinity) {
+    if (entry?.apiKey === apiKey) _accountAffinity.delete(key);
+  }
+}
+
+export function rememberAccountAffinity(apiKey, modelKey = null, callerKey = '') {
+  const key = accountAffinityKey(modelKey, callerKey);
+  if (!apiKey || !key) return false;
+  if (!accounts.some(a => a.apiKey === apiKey)) return false;
+  const now = Date.now();
+  _accountAffinity.set(key, { apiKey, lastUsed: now });
+  pruneAccountAffinity(now);
+  return true;
+}
+
 function rpmLimitFor(account) {
   return TIER_RPM[account.tier || 'unknown'] ?? 20;
 }
@@ -64,9 +96,45 @@ function pruneRpmHistory(account, now) {
   return account._rpmHistory.length;
 }
 
+function activeModelRateLimits(account, now = Date.now()) {
+  if (!account._modelRateLimits) return {};
+  const out = {};
+  for (const [modelKey, until] of Object.entries(account._modelRateLimits)) {
+    if (until > now) out[modelKey] = until;
+    else delete account._modelRateLimits[modelKey];
+  }
+  return out;
+}
+
+function modelRateLimitDetails(account, now = Date.now()) {
+  return Object.entries(activeModelRateLimits(account, now)).map(([modelKey, resetAt]) => {
+    const retryAfterMs = Math.max(1000, resetAt - now);
+    return {
+      modelKey,
+      resetAt,
+      resetAtIso: new Date(resetAt).toISOString(),
+      retryAfterMs,
+      retryAfterSec: Math.ceil(retryAfterMs / 1000),
+    };
+  });
+}
+
 // Serialize concurrent saveAccounts calls — multiple async paths
 // (reportSuccess / markRateLimited / updateCapability / probe) can fire
 // together; without a mutex the last writer wins on stale memory state.
+function reserveAccount(account, now) {
+  const reservationTimestamp = nextReservationToken(now);
+  account._rpmHistory.push(reservationTimestamp);
+  account.lastUsed = now;
+  account._inflight = (account._inflight || 0) + 1;
+  return {
+    id: account.id, email: account.email, apiKey: account.apiKey,
+    apiServerUrl: account.apiServerUrl || '',
+    proxy: getEffectiveProxy(account.id) || null,
+    reservationTimestamp,
+  };
+}
+
 let _saveInFlight = false;
 let _savePending = false;
 function _serializeAccounts() {
@@ -77,6 +145,7 @@ function _serializeAccounts() {
     tier: a.tier, tierManual: !!a.tierManual,
     capabilities: a.capabilities, lastProbed: a.lastProbed,
     credits: a.credits || null,
+    modelRateLimits: activeModelRateLimits(a),
     blockedModels: a.blockedModels || [],
     refreshToken: a.refreshToken || '',
     // From GetUserStatus — the authoritative tier/entitlement snapshot.
@@ -192,6 +261,7 @@ function loadAccounts() {
         capabilities: a.capabilities || {},
         lastProbed: a.lastProbed || 0,
         credits: a.credits || null,
+        _modelRateLimits: a.modelRateLimits && typeof a.modelRateLimits === 'object' ? a.modelRateLimits : {},
         blockedModels: Array.isArray(a.blockedModels) ? a.blockedModels : [],
         tierManual: !!a.tierManual,
         userStatus: a.userStatus || null,
@@ -418,6 +488,7 @@ export function removeAccount(id) {
   if (idx === -1) return false;
   const account = accounts[idx];
   accounts.splice(idx, 1);
+  removeAccountAffinityForApiKey(account.apiKey);
   saveAccounts();
   // Drop any Cascade conversations owned by this key so future requests
   // don't try to resume on an account that no longer exists.
@@ -440,7 +511,7 @@ export function removeAccount(id) {
  * Returns null when every account is temporarily full — callers should
  * wait a moment and retry (see handlers/chat.js queue loop).
  */
-export function getApiKey(excludeKeys = [], modelKey = null) {
+export function getApiKey(excludeKeys = [], modelKey = null, callerKey = '') {
   const now = Date.now();
   const candidates = [];
   for (const a of accounts) {
@@ -457,6 +528,16 @@ export function getApiKey(excludeKeys = [], modelKey = null) {
   }
   if (candidates.length === 0) return null;
 
+  const affinityKey = accountAffinityKey(modelKey, callerKey);
+  if (affinityKey) {
+    pruneAccountAffinity(now);
+    const preferred = _accountAffinity.get(affinityKey);
+    const sticky = preferred
+      ? candidates.find(c => c.account.apiKey === preferred.apiKey)
+      : null;
+    if (sticky) return reserveAccount(sticky.account, now);
+  }
+
   // Pick the account with the fewest in-flight requests first (so a burst
   // of concurrent calls spreads across accounts instead of piling onto a
   // single one that still has RPM headroom — see issue #37). Then prefer
@@ -471,17 +552,7 @@ export function getApiKey(excludeKeys = [], modelKey = null) {
     return (x.account.lastUsed || 0) - (y.account.lastUsed || 0);
   });
 
-  const { account } = candidates[0];
-  const reservationTimestamp = nextReservationToken(now);
-  account._rpmHistory.push(reservationTimestamp);
-  account.lastUsed = now;
-  account._inflight = (account._inflight || 0) + 1;
-  return {
-    id: account.id, email: account.email, apiKey: account.apiKey,
-    apiServerUrl: account.apiServerUrl || '',
-    proxy: getEffectiveProxy(account.id) || null,
-    reservationTimestamp,
-  };
+  return reserveAccount(candidates[0].account, now);
 }
 
 /**
@@ -515,16 +586,7 @@ export function acquireAccountByKey(apiKey, modelKey = null) {
   const used = pruneRpmHistory(a, now);
   if (used >= limit) return null;
   if (modelKey && !isModelAllowedForAccount(a, modelKey)) return null;
-  const reservationTimestamp = nextReservationToken(now);
-  a._rpmHistory.push(reservationTimestamp);
-  a.lastUsed = now;
-  a._inflight = (a._inflight || 0) + 1;
-  return {
-    id: a.id, email: a.email, apiKey: a.apiKey,
-    apiServerUrl: a.apiServerUrl || '',
-    proxy: getEffectiveProxy(a.id) || null,
-    reservationTimestamp,
-  };
+  return reserveAccount(a, now);
 }
 
 /**
@@ -619,6 +681,7 @@ export function markRateLimited(apiKey, durationMs = 5 * 60 * 1000, modelKey = n
     account.rateLimitedUntil = Math.max(account.rateLimitedUntil || 0, until);
     log.warn(`Account ${account.id} (${account.email}) rate-limited (all models) for ${Math.round(safeMs / 60000)} min`);
   }
+  saveAccounts();
 }
 
 export function refundReservation(apiKey, timestamp) {
@@ -776,6 +839,7 @@ export function getAccountList() {
   return accounts.map(a => {
     const rpmLimit = rpmLimitFor(a);
     const rpmUsed = pruneRpmHistory(a, now);
+    const activeLimits = activeModelRateLimits(a, now);
     return {
       id: a.id,
       email: a.email,
@@ -791,9 +855,11 @@ export function getAccountList() {
       lastProbed: a.lastProbed || 0,
       rateLimitedUntil: a.rateLimitedUntil || 0,
       rateLimited: !!(a.rateLimitedUntil && a.rateLimitedUntil > now),
-      modelRateLimits: a._modelRateLimits ? Object.fromEntries(
-        Object.entries(a._modelRateLimits).filter(([, v]) => v > now)
-      ) : {},
+      rateLimitRetryAfterMs: a.rateLimitedUntil && a.rateLimitedUntil > now
+        ? Math.max(1000, a.rateLimitedUntil - now)
+        : 0,
+      modelRateLimits: activeLimits,
+      modelRateLimitDetails: modelRateLimitDetails(a, now),
       rpmUsed,
       rpmLimit,
       credits: a.credits || null,

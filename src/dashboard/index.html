@@ -3187,6 +3187,16 @@ const App = {
       if (s < 86400) return `${Math.floor(s/3600)}h ${T('ago')}`;
       return `${Math.floor(s/86400)}d ${T('ago')}`;
     };
+    const fmtCooldown = (ms) => {
+      const sec = Math.max(1, Math.ceil((ms || 0) / 1000));
+      if (sec < 60) return `${sec}s`;
+      const min = Math.floor(sec / 60);
+      const restSec = sec % 60;
+      if (min < 60) return restSec ? `${min}m ${restSec}s` : `${min}m`;
+      const h = Math.floor(min / 60);
+      const restMin = min % 60;
+      return restMin ? `${h}h ${restMin}m` : `${h}h`;
+    };
     const renderBar = (label, pct, resetAt, noDataText) => {
       const isN = pct == null;
       const v = isN ? 0 : Math.max(0, Math.min(100, pct));
@@ -3247,6 +3257,20 @@ const App = {
         </div>`;
       }).join('');
 
+    const modelCooldowns = Array.isArray(a.modelRateLimitDetails) ? a.modelRateLimitDetails : [];
+    const modelCooldownHtml = modelCooldowns.length
+      ? `<div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--border)">
+          <div style="font-size:11px;font-weight:700;color:var(--warn,#f59e0b);margin-bottom:8px">Model cooldowns</div>
+          <div class="model-chips">
+            ${modelCooldowns.map(x => `<div class="model-chip blocked" title="Reset: ${this.esc(x.resetAtIso || '')}">
+              <span class="model-chip-dot"></span>
+              <span class="model-chip-name">${this.esc(x.modelKey)}</span>
+              <span class="model-chip-cost" style="color:var(--warn,#f59e0b);border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.10)">${fmtCooldown(x.retryAfterMs)}</span>
+            </div>`).join('')}
+          </div>
+        </div>`
+      : '';
+
     // Plan dates
     let trialDaysLeft = null;
     if (us.trialEndMs) trialDaysLeft = Math.max(0, Math.ceil((us.trialEndMs - Date.now()) / 86400000));
@@ -3295,6 +3319,7 @@ const App = {
               <span class="k">${T('runtime.status')}</span><span class="v"><span class="badge ${a.status}">${a.status}</span>${a.rateLimited ? ` <span class="badge warn">${I18n.t('card.rateLimit.badge')}</span>` : ''}</span>
               <span class="k">${T('runtime.errors')}</span><span class="v" style="color:${a.errorCount > 0 ? 'var(--error)' : 'inherit'}">${a.errorCount || 0}</span>
               <span class="k">${T('runtime.rpm')}</span><span class="v">${a.rpmUsed ?? 0} / ${a.rpmLimit ?? 0}</span>
+              ${a.rateLimitRetryAfterMs ? `<span class="k">Global cooldown</span><span class="v" style="color:var(--warn,#f59e0b)">${fmtCooldown(a.rateLimitRetryAfterMs)}</span>` : ''}
             </div>
             <div class="detail-kv">
               <span class="k">${T('runtime.lastUsed')}</span><span class="v">${fmtAgo(a.lastUsed)}</span>
@@ -3307,6 +3332,7 @@ const App = {
               ${cr.lastError ? `<span class="k">${T('runtime.lastError')}</span><span class="v" style="color:var(--error);font-size:11px">${this.esc(cr.lastError).slice(0, 80)}</span>` : ''}
             </div>
           </div>
+          ${modelCooldownHtml}
         </div>
       </div>
     </div>`;

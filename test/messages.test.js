@@ -196,6 +196,37 @@ describe('Anthropic messages request translation', () => {
     assert.equal(capturedBody.response_format.json_schema.strict, true);
   });
 
+  it('does not force Claude Code output_config.format into final JSON mode', async () => {
+    let capturedBody = null;
+    const schema = {
+      type: 'object',
+      properties: { ok: { type: 'boolean' } },
+      required: ['ok'],
+      additionalProperties: false,
+    };
+    await handleMessages({
+      model: 'claude-sonnet-4.6',
+      system: "You are Claude Code, Anthropic's official CLI for Claude.",
+      metadata: { user_id: JSON.stringify({ device_id: 'device-json-mode' }) },
+      output_config: { format: { type: 'json_schema', schema } },
+      messages: [{ role: 'user', content: 'Explain the project normally.' }],
+    }, {
+      async handleChatCompletions(body) {
+        capturedBody = body;
+        return {
+          status: 200,
+          body: {
+            model: body.model,
+            choices: [{ index: 0, message: { role: 'assistant', content: 'normal prose' }, finish_reason: 'stop' }],
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          },
+        };
+      },
+    });
+
+    assert.equal(capturedBody.response_format, undefined);
+  });
+
   it('extracts a stable per-user sub key from Claude Code metadata.user_id JSON', () => {
     const userIdJson = JSON.stringify({
       device_id: '42a4480e6ef9848582c0452f45ea155a89ed9b296d91700b7226973bb83f4495',
@@ -367,6 +398,11 @@ describe('Anthropic messages request translation', () => {
     ]), true);
     assert.equal(isExplicitJsonRequested([
       { role: 'user', content: 'Tell me about JSON as a data format.' },
+    ]), false);
+    assert.equal(isExplicitJsonRequested([
+      { role: 'user', content: 'Read package.json and answer only compact JSON with name and version.' },
+      { role: 'assistant', content: '{"name":"windsurf-api","version":"2.0.11"}' },
+      { role: 'user', content: 'Now explain the change in normal prose.' },
     ]), false);
   });
 

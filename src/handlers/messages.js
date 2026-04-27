@@ -64,6 +64,32 @@ export function extractCallerSubKey(body) {
 
 // ─── Anthropic → OpenAI request translation ──────────────────
 
+function systemTextFromAnthropic(system) {
+  if (typeof system === 'string') return system;
+  if (Array.isArray(system)) return system.map(b => b?.text || '').join('\n');
+  return '';
+}
+
+function hasClaudeCodeMetadata(body) {
+  const userId = body?.metadata?.user_id;
+  if (typeof userId !== 'string' || !userId) return false;
+  try {
+    const parsed = JSON.parse(userId);
+    return !!(parsed && typeof parsed === 'object' && (
+      parsed.device_id || parsed.deviceId
+      || parsed.session_id || parsed.sessionId
+      || parsed.account_uuid || parsed.accountUuid
+    ));
+  } catch {
+    return false;
+  }
+}
+
+function isClaudeCodeRequest(body, systemText = '') {
+  return hasClaudeCodeMetadata(body)
+    || /Anthropic's official CLI for Claude|Claude Code|cc_version=|<env>|content_block|tool_use/i.test(systemText);
+}
+
 function anthropicToOpenAI(body) {
   const mapAnthropicToolChoice = (toolChoice) => {
     if (!toolChoice || typeof toolChoice !== 'object') return toolChoice;
@@ -77,13 +103,9 @@ function anthropicToOpenAI(body) {
   };
   const messages = [];
   const toolNameById = new Map();
+  const systemText = systemTextFromAnthropic(body.system);
   if (body.system) {
-    const sysText = typeof body.system === 'string'
-      ? body.system
-      : Array.isArray(body.system)
-        ? body.system.map(b => b.text || '').join('\n')
-        : '';
-    if (sysText) messages.push({ role: 'system', content: sysText });
+    if (systemText) messages.push({ role: 'system', content: systemText });
   }
   for (const m of (body.messages || [])) {
     const role = m.role === 'assistant' ? 'assistant' : 'user';
@@ -174,8 +196,10 @@ function anthropicToOpenAI(body) {
   const oc = body.output_config;
   const ocEffort = oc?.effort;
   const ocFormat = oc?.format;
+  const suppressOutputFormat = isClaudeCodeRequest(body, systemText)
+    && process.env.CLAUDE_CODE_OUTPUT_FORMAT_JSON !== '1';
   let translatedResponseFormat = null;
-  if (ocFormat?.type === 'json_schema' && ocFormat.schema) {
+  if (!suppressOutputFormat && ocFormat?.type === 'json_schema' && ocFormat.schema) {
     translatedResponseFormat = {
       type: 'json_schema',
       json_schema: {
@@ -184,7 +208,7 @@ function anthropicToOpenAI(body) {
         strict: ocFormat.strict !== false,
       },
     };
-  } else if (ocFormat?.type === 'json_object') {
+  } else if (!suppressOutputFormat && ocFormat?.type === 'json_object') {
     translatedResponseFormat = { type: 'json_object' };
   }
   return {

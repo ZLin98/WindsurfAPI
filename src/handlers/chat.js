@@ -5,7 +5,7 @@
 
 import { createHash, randomUUID } from 'crypto';
 import { WindsurfClient, contentToString, isCascadeTransportError } from '../client.js';
-import { getApiKey, acquireAccountByKey, releaseAccount, getAccountAvailability, reportError, reportSuccess, markRateLimited, reportInternalError, updateCapability, getAccountList, isAllRateLimited, isAllTemporarilyUnavailable, refundReservation } from '../auth.js';
+import { getApiKey, acquireAccountByKey, releaseAccount, getAccountAvailability, reportError, reportSuccess, markRateLimited, reportInternalError, updateCapability, getAccountList, isAllRateLimited, isAllTemporarilyUnavailable, refundReservation, rememberAccountAffinity } from '../auth.js';
 import { resolveModel, getModelInfo } from '../models.js';
 import { getLsFor, ensureLs } from '../langserver.js';
 import { config, log } from '../config.js';
@@ -163,7 +163,8 @@ export function extractRequestedJsonKeys(messages) {
 
 export function isExplicitJsonRequested(messages) {
   if (!Array.isArray(messages)) return false;
-  for (const m of messages) {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
     if (m?.role !== 'user') continue;
     const text = textFromMessageContent(m.content);
     if (!text || /^\s*<tool_result\b/i.test(text)) continue;
@@ -172,6 +173,7 @@ export function isExplicitJsonRequested(messages) {
     }
     if (/\bJSON\s+(?:object|only|format)\b/i.test(text)) return true;
     if (/\b(?:answer|respond|return|output)\s+only\s+(?:with\s+)?(?:valid\s+)?JSON\b/i.test(text)) return true;
+    return false;
   }
   return false;
 }
@@ -717,14 +719,14 @@ function buildUsageBody(serverUsage, messages, completionText, thinkingText = ''
 // Wait until getApiKey returns a non-null account, or until maxWaitMs expires.
 // Used when every account has momentarily exhausted its RPM budget so the
 // client is queued instead of getting a 503.
-async function waitForAccount(tried, signal, maxWaitMs = QUEUE_MAX_WAIT_MS, modelKey = null) {
+async function waitForAccount(tried, signal, maxWaitMs = QUEUE_MAX_WAIT_MS, modelKey = null, callerKey = '') {
   const deadline = Date.now() + maxWaitMs;
-  let acct = getApiKey(tried, modelKey);
+  let acct = getApiKey(tried, modelKey, callerKey);
   while (!acct) {
     if (signal?.aborted) return null;
     if (Date.now() >= deadline) return null;
     await new Promise(r => setTimeout(r, QUEUE_RETRY_MS));
-    acct = getApiKey(tried, modelKey);
+    acct = getApiKey(tried, modelKey, callerKey);
   }
   return acct;
 }
@@ -1099,7 +1101,7 @@ export async function handleChatCompletions(body, context = {}) {
       }
     }
     if (!acct) {
-      acct = await waitForAccountFn(tried, null, QUEUE_MAX_WAIT_MS, modelKey);
+      acct = await waitForAccountFn(tried, null, QUEUE_MAX_WAIT_MS, modelKey, callerKey);
       if (!acct) break;
     }
     tried.push(acct.apiKey);
@@ -1162,7 +1164,7 @@ export async function handleChatCompletions(body, context = {}) {
       client, chatId, created, displayModel, modelKey, messages, cascadeMessages, modelEnum, modelUid,
       useCascade, acct.apiKey, ckey,
       reuseEnabled ? { reuseEntry, lsPort: ls.port, apiKey: acct.apiKey, callerKey } : null,
-      emulateTools, toolPreamble, wantJson,
+      emulateTools, toolPreamble, wantJson, callerKey,
     );
     if (result.status === 200) return result;
     reuseEntry = null; // don't try to reuse on the retry
@@ -1261,7 +1263,7 @@ export async function handleChatCompletions(body, context = {}) {
   return lastErr || { status: 503, body: { error: { message: 'No active accounts available', type: 'pool_exhausted' } } };
 }
 
-async function nonStreamResponse(client, id, created, model, modelKey, messages, cascadeMessages, modelEnum, modelUid, useCascade, apiKey, ckey, poolCtx, emulateTools, toolPreamble, wantJson = false) {
+async function nonStreamResponse(client, id, created, model, modelKey, messages, cascadeMessages, modelEnum, modelUid, useCascade, apiKey, ckey, poolCtx, emulateTools, toolPreamble, wantJson = false, callerKey = '') {
   const startTime = Date.now();
   try {
     let allText = '';
@@ -1332,6 +1334,7 @@ async function nonStreamResponse(client, id, created, model, modelKey, messages,
     }
 
     reportSuccess(apiKey);
+    rememberAccountAffinity(apiKey, modelKey, callerKey);
     updateCapability(apiKey, modelKey, true, 'success');
     recordRequest(model, true, Date.now() - startTime, apiKey);
 
@@ -1674,7 +1677,7 @@ function streamResponse(id, created, model, modelKey, messages, cascadeMessages,
             }
           }
           if (!acct) {
-            acct = await waitForAccountFn(tried, abortController.signal, QUEUE_MAX_WAIT_MS, modelKey);
+            acct = await waitForAccountFn(tried, abortController.signal, QUEUE_MAX_WAIT_MS, modelKey, callerKey);
             if (!acct) break;
           }
           tried.push(acct.apiKey);
@@ -1766,6 +1769,7 @@ function streamResponse(id, created, model, modelKey, messages, cascadeMessages,
             }
             // success
             if (hadSuccess) reportSuccess(currentApiKey);
+            if (hadSuccess) rememberAccountAffinity(currentApiKey, modelKey, callerKey);
             updateCapability(currentApiKey, modelKey, true, 'success');
             recordRequest(model, true, Date.now() - startTime, currentApiKey);
             if (!rolePrinted) {
