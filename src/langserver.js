@@ -108,7 +108,10 @@ async function waitPortReady(port, timeoutMs = 20000) {
 export async function ensureLs(proxy = null) {
   const key = proxyKey(proxy);
   const existing = _pool.get(key);
-  if (existing && existing.ready) return existing;
+  if (existing && existing.ready) {
+    if (await isPortInUse(existing.port)) return existing;
+    invalidateLsForPort(existing.port, 'ready entry port is not listening');
+  }
 
   // Coalesce concurrent callers onto a single spawn. The chat handlers
   // call ensureLs(acct.proxy) on every request; before this guard, a burst
@@ -309,6 +312,20 @@ export function getLsEntryByPort(port) {
 }
 
 // ─── Backward-compat API ───────────────────────────────────
+
+export function invalidateLsForPort(port, reason = '') {
+  let dropped = 0;
+  for (const [key, entry] of _pool) {
+    if (entry.port !== port) continue;
+    _pool.delete(key);
+    dropped++;
+    try { entry.process?.kill('SIGTERM'); } catch {}
+    closeSessionForPort(entry.port);
+    import('./conversation-pool.js').then(m => m.invalidateFor({ lsPort: entry.port })).catch(() => {});
+    log.warn(`LS instance ${key} invalidated for port ${port}${reason ? `: ${reason}` : ''}`);
+  }
+  return dropped;
+}
 
 export function getLsPort() {
   return _pool.get('default')?.port || DEFAULT_PORT;

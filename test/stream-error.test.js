@@ -47,6 +47,12 @@ describe('stream error protocol', () => {
     assert.equal(isUpstreamTransientError(new Error('permission_denied: model unavailable')), false);
   });
 
+  it('classifies local LS connection refusal as Cascade transport failure', () => {
+    const err = new Error('connect ECONNREFUSED 127.0.0.1:42100');
+    assert.equal(isCascadeTransportError(err), true);
+    assert.equal(isUpstreamTransientError(err), true);
+  });
+
   it('redacts common secret patterns before debug request-body logging', () => {
     const redacted = redactRequestLogText('sk-1234567890abcdefghijklmnop test@example.com Cookie: session=abc eyJabc.def.ghi AKIAABCDEFGHIJKLMNOP');
     assert.doesNotMatch(redacted, /sk-1234567890/);

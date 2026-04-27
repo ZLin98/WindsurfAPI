@@ -13,7 +13,7 @@ import { execSync } from 'child_process';
 import { log } from './config.js';
 import { extractImages } from './image.js';
 import { closeSessionForPort, grpcFrame, grpcUnary, grpcStream } from './grpc.js';
-import { getLsEntryByPort } from './langserver.js';
+import { getLsEntryByPort, invalidateLsForPort } from './langserver.js';
 import {
   buildRawGetChatMessageRequest, parseRawResponse,
   buildInitializePanelStateRequest,
@@ -31,7 +31,11 @@ const LS_SERVICE = '/exa.language_server_pb.LanguageServerService';
 
 export function isCascadeTransportError(err) {
   const msg = String(err?.message || err || '');
-  return /pending stream has been canceled|ECONNRESET|ERR_HTTP2|session closed|stream closed|panel state/i.test(msg);
+  return /pending stream has been canceled|ECONNREFUSED|ECONNRESET|ERR_HTTP2|session closed|stream closed|panel state/i.test(msg);
+}
+
+function isLocalLsUnavailableError(err) {
+  return /\bECONNREFUSED\b|connect ECONNREFUSED|LS port \d+ not ready/i.test(String(err?.message || err || ''));
 }
 
 function markCascadeTransportError(err) {
@@ -42,9 +46,13 @@ function markCascadeTransportError(err) {
   return err;
 }
 
-function resetCascadeTransportState(port) {
+function resetCascadeTransportState(port, err = null) {
   // Cascade warmup 的 HTTP/2 取消代表当前 LS 会话不可靠，清掉复用状态后让下一次请求重新建会话。
   closeSessionForPort(port);
+  if (isLocalLsUnavailableError(err)) {
+    invalidateLsForPort(port, String(err?.message || err || 'local LS unavailable'));
+    return;
+  }
   const lsEntry = getLsEntryByPort(port);
   if (!lsEntry) return;
   lsEntry.workspaceInit = null;
@@ -331,7 +339,7 @@ export class WindsurfClient {
     const handleWarmupError = (stage, err) => {
       log.warn(`${stage}: ${err.message}`);
       if (!isCascadeTransportError(err)) return;
-      resetCascadeTransportState(this.port);
+      resetCascadeTransportState(this.port, err);
       throw markCascadeTransportError(new Error(`${stage}: ${err.message}`));
     };
 
@@ -935,7 +943,7 @@ export class WindsurfClient {
 
     } catch (err) {
       if (isCascadeTransportError(err)) {
-        resetCascadeTransportState(this.port);
+        resetCascadeTransportState(this.port, err);
         markCascadeTransportError(err);
       }
       onError?.(err);
