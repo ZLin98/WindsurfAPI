@@ -52,8 +52,15 @@ BEFORE="$(git rev-parse HEAD)"
 REMOTE="$(git rev-parse origin/master)"
 
 if ! git pull --ff-only --quiet 2>/dev/null; then
-  echo "    ! remote history changed; hard-resetting to origin/master"
-  git reset --hard "$REMOTE"
+  echo "    ! git pull --ff-only failed"
+  if [ "${FORCE_RESET:-0}" = "1" ]; then
+    echo "    FORCE_RESET=1, hard-resetting to origin/master"
+    git reset --hard "$REMOTE"
+  else
+    echo "    Local changes or divergent history may exist; refusing to discard them."
+    echo "    Commit/stash your local changes, or rerun with FORCE_RESET=1 to overwrite this checkout."
+    exit 1
+  fi
 fi
 
 AFTER="$(git rev-parse HEAD)"
@@ -113,7 +120,6 @@ else
 fi
 fuser -k "$PORT"/tcp >/dev/null 2>&1 || true
 pkill -f "node.*WindsurfAPI/src/index.js" >/dev/null 2>&1 || true
-pkill -f "node.*src/index.js" >/dev/null 2>&1 || true
 
 for _ in $(seq 1 30); do
   if ! ss -ltn 2>/dev/null | grep -q ":$PORT "; then break; fi

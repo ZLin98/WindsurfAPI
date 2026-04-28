@@ -13,6 +13,12 @@ describe('deployment scripts', () => {
     assert.match(updateScript, /nohup env PORT="\$PORT" node src\/index\.js/);
   });
 
+  it('does not hard-reset local changes unless explicitly requested', () => {
+    assert.match(updateScript, /FORCE_RESET/);
+    assert.doesNotMatch(updateScript, /if ! git pull[\s\S]{0,160}git reset --hard "\$REMOTE"/);
+    assert.doesNotMatch(updateScript, /pkill -f "node\.\*src\/index\.js"/);
+  });
+
   it('downloads LS binaries through a temp file before replacing the current binary', () => {
     assert.match(installLsScript, /download_to_target\(\)/);
     assert.match(installLsScript, /"\$\{target\}\.tmp\.\$\$"/);

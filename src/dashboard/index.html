@@ -3264,13 +3264,14 @@ const App = {
       const availableModels = Array.isArray(a.availableModels)
         ? a.availableModels
         : tierModels.filter(m => !blockedSet.has(m));
+      const modelUniverse = [...new Set([...tierModels, ...availableModels])];
       const availableSet = new Set(availableModels);
-      const blockedCount = Math.max(0, tierModels.length - availableModels.length);
+      const blockedCount = Math.max(0, modelUniverse.length - availableModels.length);
       const availCount = availableModels.length;
-      const capsHtml = tierModels.length
+      const capsHtml = modelUniverse.length
         ? `<button class="btn btn-ghost btn-xs" style="min-width:96px" onclick="App.openBlockedModal('${this.escJsAttr(a.id)}')" title="${I18n.t('account.editModels')}">
              <span style="color:var(--success,#10b981);font-weight:600">${availCount}</span>
-             <span style="color:var(--text-dim)">/${tierModels.length}</span>
+             <span style="color:var(--text-dim)">/${modelUniverse.length}</span>
              ${blockedCount > 0 ? `<span class="badge warn" style="margin-left:4px">-${blockedCount}</span>` : ''}
            </button>`
         : `<span class="text-xs text-dim">-</span>`;
@@ -3292,8 +3293,8 @@ const App = {
 
       const rl = a.rateLimitSnapshot || null;
       const modelCooldownCount = Array.isArray(a.modelRateLimitDetails)
-        ? a.modelRateLimitDetails.filter(x => !availableSet.size || availableSet.has(x.modelKey)).length
-        : Object.keys(a.modelRateLimits || {}).filter(m => !availableSet.size || availableSet.has(m)).length;
+        ? a.modelRateLimitDetails.filter(x => availableSet.has(x.modelKey)).length
+        : Object.keys(a.modelRateLimits || {}).filter(m => availableSet.has(m)).length;
       const modelCooldownTag = modelCooldownCount > 0
         ? `<span>${I18n.t('rateLimit.modelCooldowns', { count: modelCooldownCount })}</span>`
         : '';
@@ -3500,8 +3501,9 @@ const App = {
     const visibleModels = Array.isArray(a.availableModels)
       ? a.availableModels
       : tierModels.filter(m => !blocked.has(m));
+    const modelUniverse = [...new Set([...tierModels, ...visibleModels])];
     const visibleSet = new Set(visibleModels);
-    const hiddenCount = Math.max(0, tierModels.length - visibleModels.length);
+    const hiddenCount = Math.max(0, modelUniverse.length - visibleModels.length);
     const providerOrder = ['anthropic', 'openai', 'google', 'deepseek', 'xai', 'alibaba', 'moonshot', 'zhipu', 'minimax', 'windsurf', 'other'];
     const providerColors = {
       anthropic: '#d97706', openai: '#10b981', google: '#4285f4', deepseek: '#7c3aed',
@@ -3541,7 +3543,7 @@ const App = {
       }).join('');
 
     const modelCooldowns = (Array.isArray(a.modelRateLimitDetails) ? a.modelRateLimitDetails : [])
-      .filter(x => !visibleSet.size || visibleSet.has(x.modelKey));
+      .filter(x => visibleSet.has(x.modelKey));
     const modelCooldownHtml = modelCooldowns.length
       ? `<div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--border)">
           <div style="font-size:11px;font-weight:700;color:var(--warn,#f59e0b);margin-bottom:8px">Model cooldowns</div>
@@ -3593,7 +3595,7 @@ const App = {
               <button class="btn btn-ghost btn-xs" onclick="App.openBlockedModal('${this.escJsAttr(a.id)}')" style="font-size:10px">${I18n.t('account.editModels')}</button>
             </div>
           </div>
-          ${tierModels.length === 0
+          ${modelUniverse.length === 0
             ? `<div class="model-empty">${I18n.t('toast.noTierModels')}</div>`
             : visibleModels.length === 0
               ? `<div class="model-empty"><span>${T('models.blocked')}</span><button class="btn btn-ghost btn-xs" onclick="App.openBlockedModal('${this.escJsAttr(a.id)}')">${I18n.t('account.editModels')}</button></div>`
@@ -3716,8 +3718,12 @@ const App = {
       const acct = (d.accounts || []).find(a => a.id === id);
       if (!acct) return this.toast(I18n.t('error.accountNotFound'), 'error');
       const tierModels = acct.tierModels || [];
+      const acctAvailableModels = Array.isArray(acct.availableModels)
+        ? acct.availableModels
+        : tierModels.filter(m => !(acct.blockedModels || []).includes(m));
+      const modelUniverse = [...new Set([...tierModels, ...acctAvailableModels])];
       const blocked = new Set(acct.blockedModels || []);
-      if (!tierModels.length) return this.toast(I18n.t('toast.noTierModels'), 'info');
+      if (!modelUniverse.length) return this.toast(I18n.t('toast.noTierModels'), 'info');
       const providerOf = (m) => {
         if (m.startsWith('claude')) return 'anthropic';
         if (m.startsWith('gpt') || m.startsWith('o3') || m.startsWith('o4')) return 'openai';
@@ -3730,9 +3736,9 @@ const App = {
         return 'other';
       };
       const groups = {};
-      for (const m of tierModels) (groups[providerOf(m)] = groups[providerOf(m)] || []).push(m);
-      const total = tierModels.length;
-      const availInit = total - blocked.size;
+      for (const m of modelUniverse) (groups[providerOf(m)] = groups[providerOf(m)] || []).push(m);
+      const total = modelUniverse.length;
+      const availInit = modelUniverse.filter(m => !blocked.has(m)).length;
       const html = `
         <div class="bm-summary">
           <div class="text-xs text-dim">${I18n.t('modal.blockedModels.hint')}</div>

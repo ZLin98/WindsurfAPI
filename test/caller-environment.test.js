@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { extractCallerEnvironment } from '../src/handlers/chat.js';
+import { callerCwdFromEnvironment, extractCallerEnvironment, scopeCallerKeyByCwd } from '../src/handlers/chat.js';
 import { buildToolPreambleForProto } from '../src/handlers/tool-emulation.js';
 
 // Why these tests exist:
@@ -94,6 +94,23 @@ describe('extractCallerEnvironment', () => {
     assert.match(extractCallerEnvironment(messages), /- Working directory: \/Users\/dev\/proj/);
   });
 
+  it('preserves spaces in quoted and key-value cwd paths', () => {
+    assert.match(extractCallerEnvironment([
+      { role: 'system', content: 'Working directory: "/Users/lin/My Project A"' },
+    ]), /- Working directory: \/Users\/lin\/My Project A/);
+
+    assert.match(extractCallerEnvironment([
+      { role: 'system', content: 'The current working directory is `/Users/lin/My Project B`.' },
+    ]), /- Working directory: \/Users\/lin\/My Project B/);
+  });
+
+  it('scopes projects with shared space-containing prefixes separately', () => {
+    const a = extractCallerEnvironment([{ role: 'system', content: 'Working directory: "/Users/lin/My Project A"' }]);
+    const b = extractCallerEnvironment([{ role: 'system', content: 'Working directory: "/Users/lin/My Project B"' }]);
+
+    assert.notEqual(scopeCallerKeyByCwd('api:user:abc', a), scopeCallerKeyByCwd('api:user:abc', b));
+  });
+
   it('does not match abstract prose without an actual path', () => {
     // "the working directory you choose" / "the working directory in the
     // docs" never has a `/` or `~` in the captured slot, so the path-tail
@@ -124,6 +141,28 @@ describe('extractCallerEnvironment', () => {
     assert.equal(extractCallerEnvironment(null), '');
     assert.equal(extractCallerEnvironment(undefined), '');
     assert.equal(extractCallerEnvironment('not an array'), '');
+  });
+});
+
+describe('caller cwd scoping', () => {
+  it('extracts the cwd from the lifted environment block', () => {
+    assert.equal(
+      callerCwdFromEnvironment('- Working directory: /home/dev/project\n- Platform: linux'),
+      '/home/dev/project'
+    );
+  });
+
+  it('scopes caller keys by cwd without leaking the raw path', () => {
+    const linuxScope = scopeCallerKeyByCwd('api:user:abc', '- Working directory: /srv/WindsurfAPI');
+    const localScope = scopeCallerKeyByCwd('api:user:abc', '- Working directory: /Users/lin/Code/OtherProject');
+
+    assert.notEqual(linuxScope, localScope);
+    assert.match(linuxScope, /^api:user:abc:cwd:[0-9a-f]{16}$/);
+    assert.doesNotMatch(linuxScope, /WindsurfAPI|\/srv/);
+  });
+
+  it('leaves the caller key unchanged when no cwd was found', () => {
+    assert.equal(scopeCallerKeyByCwd('api:user:abc', ''), 'api:user:abc');
   });
 });
 

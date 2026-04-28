@@ -24,10 +24,14 @@ for (const skin of ['src/dashboard/index.html', 'src/dashboard/index-sketch.html
 
 test('account detail only renders models left enabled by the account editor', () => {
   const html = readFileSync(join(root, 'src/dashboard/index.html'), 'utf8');
+  assert.match(html, /const modelUniverse = \[\.\.\.new Set\(\[\.\.\.tierModels, \.\.\.availableModels\]\)\]/);
+  assert.match(html, /const modelUniverse = \[\.\.\.new Set\(\[\.\.\.tierModels, \.\.\.acctAvailableModels\]\)\]/);
   assert.match(html, /const visibleModels = Array\.isArray\(a\.availableModels\)/);
   assert.match(html, /for \(const m of visibleModels\)/);
   assert.doesNotMatch(html, /model-chip \$\{blocked\.has\(m\.id\)/);
   assert.doesNotMatch(html, /\.model-chip\.blocked/);
+  assert.doesNotMatch(html, /!availableSet\.size \|\| availableSet\.has/);
+  assert.doesNotMatch(html, /!visibleSet\.size \|\| visibleSet\.has/);
   assert.match(html, /blockedModalFilter\(query\)/);
 });
 

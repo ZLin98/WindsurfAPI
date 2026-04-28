@@ -392,6 +392,10 @@ export function shouldUseCascadeReuse({ useCascade, emulateTools, modelKey, allo
   return !!allowToolReuse && isToolSensitiveOpusModel(modelKey);
 }
 
+export function shouldAllowCascadeReuseForCallerScope({ claudeCodeLike = false, callerCwd = '' } = {}) {
+  return !claudeCodeLike || !!callerCwd;
+}
+
 function shouldForceCascadeReuse({ emulateTools, modelKey }) {
   return !!emulateTools && OPUS47_TOOL_EMULATED_REUSE && isToolSensitiveOpusModel(modelKey);
 }
@@ -596,15 +600,21 @@ export function extractCallerEnvironment(messages) {
   // The capture group is locked to `[/~]…` so we only grab actual-looking
   // paths — "the working directory you choose" or similar abstract prose
   // never has a `/` or `~` in the captured slot and is rejected.
-  const PATH_TAIL = `(?:[\\/~]|[A-Za-z]:\\\\)[^\\s\`'"<>\\n.,;)]+`;
+  const PATH_START = `(?:[\\/~]|[A-Za-z]:[\\\\/])`;
+  const QUOTED_PATH = `(?:\`([^\`\\n]+)\`|"([^"\\n]+)"|'([^'\\n]+)')`;
+  const RAW_LINE_PATH = `(${PATH_START}[^\\n<]+)`;
+  const RAW_PROSE_PATH = `(${PATH_START}[^\\n\`'"<>]+?)(?=(?:[.;,)]\\s|[.;,)]$|\\s+(?:and|with|for|Match|Use|This|The)\\b|\\n|$))`;
   const PATTERNS = [
     ['cwd', new RegExp(
       // Form (a): line-anchored key/value
-      `(?:^|\\n)\\s*(?:[-*]\\s+)?(?:Working directory|cwd|<cwd>)\\s*[:=]\\s*\`?(${PATH_TAIL})\`?` +
+      `(?:^|\\n)\\s*(?:[-*]\\s+)?(?:Working directory|cwd|<cwd>)\\s*[:=]\\s*(?:${QUOTED_PATH}|${RAW_LINE_PATH})` +
       // Form (b): prose "current working directory is /path"
-      `|(?:current\\s+working\\s+directory(?:\\s+is)?)\\s*[:=]?\\s*\`?(${PATH_TAIL})\`?`,
+      `|(?:current\\s+working\\s+directory(?:\\s+is)?)\\s*[:=]?\\s*(?:${QUOTED_PATH}|${RAW_PROSE_PATH})`,
       'i'
-    ), (v) => `- Working directory: ${v}`],
+    ), (v) => {
+      const clean = cleanCallerCwdForEnvironment(v);
+      return clean ? `- Working directory: ${clean}` : '';
+    }],
     ['git', /(?:^|\n)\s*(?:[-*]\s+)?Is directory a git repo\s*[:=]\s*([^\n<]+)/i, (v) => `- Is the directory a git repo: ${v}`],
     ['platform', /(?:^|\n)\s*(?:[-*]\s+)?Platform\s*[:=]\s*([^\n<]+)/i, (v) => `- Platform: ${v}`],
     ['os', /(?:^|\n)\s*(?:[-*]\s+)?OS Version\s*[:=]\s*([^\n<]+)/i, (v) => `- OS version: ${v}`],
@@ -622,14 +632,16 @@ export function extractCallerEnvironment(messages) {
       if (seen.has(key)) continue;
       const match = content.match(re);
       if (match) {
-        // The cwd pattern has two alternative capture groups (one per
-        // accepted form); the others have one. Pick the first non-empty.
-        const value = (match[1] || match[2] || '').trim();
+        // The cwd pattern has several alternative capture groups (quoted,
+        // raw line, prose); the others have one. Pick the first non-empty.
+        const value = match.slice(1).find(Boolean)?.trim() || '';
         // Reject obvious garbage (empty after trim, control chars, our own
         // redaction marker leaking back in).
         if (!value || /[\x00-\x1f]/.test(value) || value === '…') continue;
+        const formatted = fmt(value);
+        if (!formatted) continue;
         seen.add(key);
-        out.push(fmt(value));
+        out.push(formatted);
       }
     }
     if (seen.size === PATTERNS.length) break;
@@ -649,6 +661,44 @@ export function extractCallerEnvironment(messages) {
   // works on every Anthropic-format client we have tested).
   if (!seen.has('cwd')) return '';
   return out.join('\n');
+}
+
+function cleanCallerCwdForEnvironment(cwd = '') {
+  let value = String(cwd || '').trim();
+  if (!value) return '';
+  if ((value.startsWith('`') && value.endsWith('`'))
+    || (value.startsWith('"') && value.endsWith('"'))
+    || (value.startsWith("'") && value.endsWith("'"))) {
+    value = value.slice(1, -1).trim();
+  }
+  value = value.replace(/[.,;)]+$/g, '').trim();
+  if (!/^(?:[\/~]|[A-Za-z]:[\\/])/.test(value)) return '';
+  return value;
+}
+
+function normalizeCallerCwd(cwd = '') {
+  let value = String(cwd || '').trim();
+  if (!value) return '';
+  if ((value.startsWith('`') && value.endsWith('`'))
+    || (value.startsWith('"') && value.endsWith('"'))
+    || (value.startsWith("'") && value.endsWith("'"))) {
+    value = value.slice(1, -1).trim();
+  }
+  value = value.replace(/[.,;)]+$/g, '').trim();
+  value = value.replace(/\\+/g, '/').replace(/\/+$/, '');
+  if (/^[A-Za-z]:\//.test(value)) value = value[0].toLowerCase() + value.slice(1);
+  return value;
+}
+
+export function callerCwdFromEnvironment(callerEnv = '') {
+  const match = String(callerEnv || '').match(/(?:^|\n)- Working directory:\s*([^\n]+)/);
+  return normalizeCallerCwd(match?.[1] || '');
+}
+
+export function scopeCallerKeyByCwd(callerKey = '', callerEnv = '') {
+  const cwd = callerCwdFromEnvironment(callerEnv);
+  if (!cwd) return String(callerKey || '');
+  return `${String(callerKey || 'anonymous')}:cwd:${shortHash(cwd)}`;
 }
 
 // Rough token estimate (~4 chars/token). Used only to populate the
@@ -803,7 +853,7 @@ export async function handleChatCompletions(body, context = {}) {
     response_format,
   } = body;
   let messages = body.messages;
-  const callerKey = context.callerKey || body.__callerKey || '';
+  const baseCallerKey = context.callerKey || body.__callerKey || '';
   const cachePolicy = body.__cachePolicy || null;
   const checkMessageRateLimitFn = context.checkMessageRateLimit || checkMessageRateLimit;
   const waitForAccountFn = context.waitForAccount || waitForAccount;
@@ -946,6 +996,16 @@ export async function handleChatCompletions(body, context = {}) {
   const hasTools = Array.isArray(tools) && tools.length > 0;
   const hasToolHistory = Array.isArray(messages) && messages.some(m => m?.role === 'tool' || (m?.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length));
   const emulateTools = useCascade && (hasTools || hasToolHistory);
+  const callerEnv = extractCallerEnvironment(messages);
+  const callerCwd = callerCwdFromEnvironment(callerEnv);
+  const callerKey = scopeCallerKeyByCwd(baseCallerKey, callerEnv);
+  const callerScopeAllowsReuse = shouldAllowCascadeReuseForCallerScope({
+    claudeCodeLike: isClaudeCodeLikeRequest(body, messages),
+    callerCwd,
+  });
+  if (!callerScopeAllowsReuse) {
+    log.info(`Chat[${reqId}]: cascade reuse disabled for Claude Code request without cwd scope`);
+  }
   // Build proto-level preamble (goes into tool_calling_section override).
   // Also inject into the last user message as fallback — some models in
   // NO_TOOL mode ignore the SectionOverride entirely and refuse to call
@@ -954,7 +1014,6 @@ export async function handleChatCompletions(body, context = {}) {
   // the proto-level system slot so Cascade's authoritative planner system
   // prompt can no longer override them with /tmp/windsurf-workspace
   // priors. See extractCallerEnvironment() above for the parser.
-  const callerEnv = emulateTools ? extractCallerEnvironment(messages) : '';
   let toolPreamble = '';
   // Payload budget for the proto-level tool preamble. The upstream LS
   // panel state caps total request size at ~30KB; the preamble alone can
@@ -1081,6 +1140,7 @@ export async function handleChatCompletions(body, context = {}) {
       checkMessageRateLimit: checkMessageRateLimitFn,
       waitForAccount: waitForAccountFn,
       cachePolicy,
+      callerScopeAllowsReuse,
     });
   }
 
@@ -1109,6 +1169,7 @@ export async function handleChatCompletions(body, context = {}) {
   //
   // Conversation reuse lets Cascade keep server-side context across turns.
   const reuseEnabled = shouldUseCascadeReuse({ useCascade, emulateTools, modelKey })
+    && callerScopeAllowsReuse
     && (isExperimentalEnabled('cascadeConversationReuse') || shouldForceCascadeReuse({ emulateTools, modelKey }));
   const strictReuse = shouldUseStrictCascadeReuse({ emulateTools, modelKey });
   const fpBefore = reuseEnabled ? fingerprintBefore(messages, modelKey, callerKey) : null;
@@ -1534,6 +1595,7 @@ async function nonStreamResponse(client, id, created, model, modelKey, messages,
 function streamResponse(id, created, model, modelKey, messages, cascadeMessages, modelEnum, modelUid, useCascade, ckey, emulateTools, toolPreamble, reqId, wantJson = false, callerKey = '', deps = {}) {
   const checkMessageRateLimitFn = deps.checkMessageRateLimit || checkMessageRateLimit;
   const waitForAccountFn = deps.waitForAccount || waitForAccount;
+  const callerScopeAllowsReuse = deps.callerScopeAllowsReuse !== false;
   // Cache policy threads through deps because streamResponse is a top-level
   // helper, not a closure. Without this, lines that compute TTL hints or
   // attribute usage to ephemeral_5m_input_tokens / ephemeral_1h_input_tokens
@@ -1636,6 +1698,7 @@ function streamResponse(id, created, model, modelKey, messages, cascadeMessages,
       // requests opt in even when the global experiment toggle is off, because
       // replaying full Claude Code history is what triggers context blowups.
       const reuseEnabled = shouldUseCascadeReuse({ useCascade, emulateTools, modelKey })
+        && callerScopeAllowsReuse
         && (isExperimentalEnabled('cascadeConversationReuse') || shouldForceCascadeReuse({ emulateTools, modelKey }));
       const strictReuse = shouldUseStrictCascadeReuse({ emulateTools, modelKey });
       const fpBefore = reuseEnabled ? fingerprintBefore(messages, modelKey, callerKey) : null;

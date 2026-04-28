@@ -1,6 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { isThinkingRequested, shouldUseCascadeReuse, shouldUseStrictCascadeReuse } from '../src/handlers/chat.js';
+import {
+  isThinkingRequested,
+  shouldAllowCascadeReuseForCallerScope,
+  shouldUseCascadeReuse,
+  shouldUseStrictCascadeReuse,
+} from '../src/handlers/chat.js';
 
 describe('shouldUseCascadeReuse', () => {
   it('allows reuse for normal Cascade chat turns', () => {
@@ -83,6 +88,17 @@ describe('shouldUseStrictCascadeReuse', () => {
       strict: false,
       allowOpus47Strict: true,
     }), false);
+  });
+});
+
+describe('shouldAllowCascadeReuseForCallerScope', () => {
+  it('requires a cwd scope before Claude Code requests can reuse Cascade context', () => {
+    assert.equal(shouldAllowCascadeReuseForCallerScope({ claudeCodeLike: true, callerCwd: '' }), false);
+    assert.equal(shouldAllowCascadeReuseForCallerScope({ claudeCodeLike: true, callerCwd: '/Users/lin/project' }), true);
+  });
+
+  it('keeps non-Claude-Code callers on the existing reuse path', () => {
+    assert.equal(shouldAllowCascadeReuseForCallerScope({ claudeCodeLike: false, callerCwd: '' }), true);
   });
 });
 

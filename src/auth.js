@@ -159,6 +159,9 @@ function rateLimitSnapshotForList(account, now = Date.now()) {
   if (out.resetAt) {
     const ms = Number(out.resetAt) - now;
     out.retryAfterMs = ms > 0 ? Math.max(1000, ms) : 0;
+    if (out.retryAfterMs === 0 && out.hasCapacity === false) {
+      out.hasCapacity = true;
+    }
   }
   return out;
 }

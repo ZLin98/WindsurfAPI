@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { fingerprintBefore, fingerprintAfter, checkout, checkin, poolStats, poolClear } from '../src/conversation-pool.js';
+import { scopeCallerKeyByCwd } from '../src/handlers/chat.js';
 
 describe('fingerprintBefore', () => {
   it('returns null for single-message conversations', () => {
@@ -64,6 +65,38 @@ describe('fingerprintBefore', () => {
     assert.notEqual(
       fingerprintBefore(msgs, 'gpt-4o'),
       fingerprintBefore(msgs, 'claude-4.5-sonnet')
+    );
+  });
+
+  it('keeps identical Claude Code prompts in different cwd scopes from colliding', () => {
+    const linuxMsgs = [
+      { role: 'user', content: '<system-reminder>\n<env>\nWorking directory: /opt/WindsurfAPI\n</env>\n</system-reminder>\n\n分析当前项目' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: '继续' },
+    ];
+    const localMsgs = [
+      { role: 'user', content: '<system-reminder>\n<env>\nWorking directory: /Users/lin/Work/App\n</env>\n</system-reminder>\n\n分析当前项目' },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: '继续' },
+    ];
+
+    assert.equal(
+      fingerprintBefore(linuxMsgs, 'claude-opus-4-7-medium', 'api:user:abc'),
+      fingerprintBefore(localMsgs, 'claude-opus-4-7-medium', 'api:user:abc'),
+      'baseline proves system-reminder cwd is stripped before hashing'
+    );
+
+    assert.notEqual(
+      fingerprintBefore(
+        linuxMsgs,
+        'claude-opus-4-7-medium',
+        scopeCallerKeyByCwd('api:user:abc', '- Working directory: /opt/WindsurfAPI')
+      ),
+      fingerprintBefore(
+        localMsgs,
+        'claude-opus-4-7-medium',
+        scopeCallerKeyByCwd('api:user:abc', '- Working directory: /Users/lin/Work/App')
+      )
     );
   });
 });

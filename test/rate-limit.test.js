@@ -141,6 +141,20 @@ describe('rate-limit handling', () => {
     assert.ok(detail.retryAfterSec >= 1, `expected retryAfterSec >= 1, got ${detail.retryAfterSec}`);
   });
 
+  it('does not keep a global rate-limit snapshot marked limited after reset time passes', async () => {
+    const account = addTestAccount('global-snapshot-expiry');
+
+    markRateLimited(account.apiKey, 1);
+    assert.equal(getAccountList().find(a => a.id === account.id).rateLimitSnapshot.hasCapacity, false);
+
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    const listed = getAccountList().find(a => a.id === account.id);
+
+    assert.equal(listed.rateLimitRetryAfterMs, 0);
+    assert.equal(listed.rateLimitSnapshot.retryAfterMs, 0);
+    assert.equal(listed.rateLimitSnapshot.hasCapacity, true);
+  });
+
   it('prefers the previous successful account for the same caller and model', () => {
     const first = addTestAccount('affinity-first');
     const second = addTestAccount('affinity-second');
