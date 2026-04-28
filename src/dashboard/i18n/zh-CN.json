@@ -79,7 +79,9 @@
     "reset": "重置",
     "clearPool": "清空对话池",
     "refresh": "刷新",
+    "refreshRateLimits": "刷新限速",
     "probe": "探测",
+    "rateLimit": "限速",
     "probeTitle": "探测能力",
     "enable": "启用",
     "disable": "停用",
@@ -160,6 +162,24 @@
     "weeklyNA": "Windsurf 未返回每周配额数据",
     "promptNA": "该账号无提示词额度数据",
     "noResetTime": "重置时间未知"
+  },
+
+  "rateLimit": {
+    "columnTooltip": "Windsurf 上游消息窗口，来自 CheckRateLimit。未知表示服务端没有返回 remaining/max。",
+    "notChecked": "未检查",
+    "fetchFailed": "检查失败",
+    "limited": "已限速",
+    "remaining": "剩余",
+    "ready": "已恢复",
+    "globalCooldown": "全局冷却",
+    "recoversIn": "{{time}} 后恢复",
+    "modelCooldowns": "{{count}} 个模型冷却",
+    "usedShort": "已用 {{used}}",
+    "remainingDetail": "剩余 {{remain}} / {{max}} 条消息",
+    "usedDetail": "已用 {{used}} 条消息",
+    "resetAt": "{{time}} 恢复",
+    "fetchedAgo": "{{time}} 前检查",
+    "checkTitle": "检查 Windsurf 上游限速"
   },
 
   "section": {
@@ -384,6 +404,7 @@
       "label": "标签",
       "tier": "层级",
       "rpm": "RPM",
+      "cloudLimit": "限速",
       "credits": "余额",
       "models": "可用模型",
       "error": "错误",
@@ -786,6 +807,13 @@
       "refreshFailed": "刷新余额失败",
       "refreshing": "正在刷新余额...",
       "allRefreshed": "余额刷新完成：{{ok}} 成功 / {{fail}} 失败"
+    },
+    "rateLimit": {
+      "checking": "正在检查 Windsurf 限速...",
+      "refreshed": "限速信息已刷新",
+      "refreshFailed": "刷新限速失败",
+      "refreshing": "正在刷新账号限速...",
+      "allRefreshed": "限速刷新完成：{{ok}} 成功 / {{fail}} 失败"
     }
   },
 

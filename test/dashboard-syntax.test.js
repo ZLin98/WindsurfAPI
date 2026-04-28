@@ -21,3 +21,21 @@ for (const skin of ['src/dashboard/index.html', 'src/dashboard/index-sketch.html
     }
   });
 }
+
+test('account detail only renders models left enabled by the account editor', () => {
+  const html = readFileSync(join(root, 'src/dashboard/index.html'), 'utf8');
+  assert.match(html, /const visibleModels = Array\.isArray\(a\.availableModels\)/);
+  assert.match(html, /for \(const m of visibleModels\)/);
+  assert.doesNotMatch(html, /model-chip \$\{blocked\.has\(m\.id\)/);
+  assert.doesNotMatch(html, /\.model-chip\.blocked/);
+  assert.match(html, /blockedModalFilter\(query\)/);
+});
+
+test('account table exposes upstream rate limits and uses full width layout', () => {
+  const html = readFileSync(join(root, 'src/dashboard/index.html'), 'utf8');
+  assert.match(html, /max-width:\s*none/);
+  assert.match(html, /rateLimitSnapshot/);
+  assert.match(html, /table\.header\.cloudLimit/);
+  assert.match(html, /checkRateLimit\('/);
+  assert.match(html, /refreshAllRateLimits/);
+});

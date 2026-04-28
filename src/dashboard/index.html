@@ -142,9 +142,10 @@ code {
 .main {
   margin-left: 232px;
   flex: 1;
+  width: calc(100% - 232px);
   padding: 28px 36px 40px;
   min-height: 100vh;
-  max-width: 1400px;
+  max-width: none;
 }
 .page-header {
   display: flex;
@@ -502,6 +503,55 @@ tbody tr:hover td { background: var(--surface-2); }
   padding: 32px 16px;
   font-style: italic;
 }
+.limit-cell {
+  min-width: 150px;
+  max-width: 210px;
+}
+.limit-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.limit-title {
+  color: var(--text);
+  font-weight: 650;
+}
+.limit-sub {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.limit-bar {
+  height: 5px;
+  background: var(--surface-3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.limit-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width .3s ease;
+}
+.limit-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 5px;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+.limit-meta strong {
+  color: var(--warn);
+  font-weight: 650;
+}
+.limit-unknown {
+  display: inline-flex;
+  color: var(--text-dim);
+  font-size: 11px;
+}
 
 /* ─── Account detail panel (expand-in-row) ──────────── */
 .expand-chevron {
@@ -618,18 +668,24 @@ tbody tr:hover td { background: var(--surface-2); }
 /* Model list grouped by provider */
 .model-list-card { grid-column: 1 / -1; }
 .model-group {
-  margin-bottom: 14px;
+  margin-bottom: 12px;
+  padding: 10px;
+  background: rgba(255,255,255,.018);
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
 .model-group:last-child { margin-bottom: 0; }
 .model-group-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 6px;
-  padding-bottom: 5px;
-  border-bottom: 1px dashed var(--border);
+  gap: 10px;
+  margin-bottom: 8px;
 }
 .model-group-name {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
   font-size: 11px;
   font-weight: 600;
   color: var(--text);
@@ -637,12 +693,17 @@ tbody tr:hover td { background: var(--surface-2); }
 }
 .model-group-count {
   font-size: 10px;
-  color: var(--text-dim);
+  color: var(--success);
   font-family: var(--mono);
+  padding: 1px 7px;
+  border: 1px solid rgba(34,197,94,.24);
+  border-radius: 999px;
+  background: rgba(34,197,94,.08);
+  white-space: nowrap;
 }
 .model-chips {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 6px;
 }
 .model-chip {
@@ -656,16 +717,16 @@ tbody tr:hover td { background: var(--surface-2); }
   border-radius: 6px;
   font-size: 11.5px;
   transition: all .15s ease;
+  min-width: 0;
 }
 .model-chip:hover {
   border-color: var(--border-strong);
   background: var(--surface-3);
+  transform: translateY(-1px);
 }
-.model-chip.blocked {
-  opacity: .45;
-  text-decoration: line-through;
-  text-decoration-color: var(--text-dim);
-  text-decoration-thickness: 1px;
+.model-chip.cooldown {
+  background: rgba(245,158,11,.08);
+  border-color: rgba(245,158,11,.22);
 }
 .model-chip-dot {
   width: 8px;
@@ -673,7 +734,7 @@ tbody tr:hover td { background: var(--surface-2); }
   border-radius: 50%;
   background: var(--success);
 }
-.model-chip.blocked .model-chip-dot { background: var(--error); }
+.model-chip.cooldown .model-chip-dot { background: var(--warn); }
 .model-chip-name {
   font-family: var(--mono);
   font-size: 11px;
@@ -699,6 +760,132 @@ tbody tr:hover td { background: var(--surface-2); }
   display: inline-block;
   margin-right: 6px;
   vertical-align: middle;
+}
+
+.model-empty {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  color: var(--text-dim);
+  font-size: 12px;
+  background: var(--surface-2);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.model-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+  font-weight: 400;
+  font-size: 11px;
+  margin-left: 6px;
+}
+.model-summary b {
+  color: var(--success);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.model-summary .muted-pill {
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  border-radius: 999px;
+  padding: 1px 7px;
+  font-family: var(--mono);
+}
+.bm-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.bm-summary-count {
+  font-family: var(--mono);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.bm-summary-count b { color: var(--success); }
+.bm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.bm-search {
+  flex: 1;
+  min-width: 180px;
+}
+.bm-list {
+  max-height: 50vh;
+  overflow: auto;
+  padding-right: 2px;
+}
+.bm-group {
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255,255,255,.018);
+  overflow: hidden;
+}
+.bm-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 9px 11px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.bm-group-name {
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+.bm-group-count {
+  margin-left: auto;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-family: var(--mono);
+}
+.bm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 6px;
+  padding: 9px;
+}
+.bm-item {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  min-width: 0;
+}
+.bm-item:hover {
+  background: var(--surface-3);
+  border-color: var(--border);
+}
+.bm-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
 }
 
 /* ─── Badges ──────────────────────────────────── */
@@ -1390,7 +1577,7 @@ tbody tr:hover td { background: var(--surface-2); }
   .sidebar .brand-name, .sidebar .brand-sub, .sidebar nav a span, .sidebar .footer .ver, .sidebar .nav-group-label { display: none; }
   .sidebar .brand { justify-content: center; padding: 20px 0; }
   .sidebar nav a { justify-content: center; padding: 10px; }
-  .main { margin-left: 60px; padding: 20px 16px; }
+  .main { margin-left: 60px; width: calc(100% - 60px); padding: 20px 16px; }
 }
 .contributor-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
 .contributor-card { display: flex; gap: 14px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); transition: border-color .15s; min-width: 0; }
@@ -1778,11 +1965,17 @@ window._firebaseOAuth = async function(provider) {
           <div class="section-title" data-i18n="section.accountList.title">账号列表</div>
           <div class="section-desc" data-i18n="section.accountList.desc">点击探测按钮可单独更新某个账号的能力信息</div>
         </div>
+        <div class="btn-group">
+          <button class="btn btn-outline btn-sm" onclick="App.refreshAllRateLimits()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M12 2v6"/><path d="M12 16v6"/><path d="M4.93 4.93l4.24 4.24"/><path d="M14.83 14.83l4.24 4.24"/><path d="M2 12h6"/><path d="M16 12h6"/><path d="M4.93 19.07l4.24-4.24"/><path d="M14.83 9.17l4.24-4.24"/></svg>
+            <span data-i18n="action.refreshRateLimits">刷新限速</span>
+          </button>
+        </div>
       </div>
       <div class="section-body tight">
         <div class="table-wrap">
           <table id="accounts-table">
-            <thead><tr><th data-i18n="table.header.id">ID</th><th data-i18n="table.header.label">标签</th><th data-i18n="table.header.tier">层级</th><th data-i18n="table.header.rpm">RPM</th><th class="th-help" data-i18n="table.header.credits" data-i18n-title="creditsBar.columnTooltip" title="配额使用情况&#10;&#10;日 — 每日高级请求剩余百分比（重置频繁）&#10;周 — 每周高级请求剩余百分比（Trial 账号重点看这条）&#10;&#10;数值越高 = 剩余越多 = 越安全&#10;悬停单条进度条可查看重置时间">余额</th><th data-i18n="table.header.models">可用模型</th><th data-i18n="table.header.status">状态</th><th data-i18n="table.header.error">错误</th><th data-i18n="table.header.lastUsed">最后使用</th><th data-i18n="table.header.key">Key</th><th data-i18n="table.header.action">操作</th></tr></thead>
+            <thead><tr><th data-i18n="table.header.id">ID</th><th data-i18n="table.header.label">标签</th><th data-i18n="table.header.tier">层级</th><th data-i18n="table.header.rpm">RPM</th><th class="th-help" data-i18n="table.header.cloudLimit" data-i18n-title="rateLimit.columnTooltip" title="Windsurf 上游消息窗口；来自 CheckRateLimit，未知时表示服务端没有返回 remaining/max">限速</th><th class="th-help" data-i18n="table.header.credits" data-i18n-title="creditsBar.columnTooltip" title="配额使用情况&#10;&#10;日 — 每日高级请求剩余百分比（重置频繁）&#10;周 — 每周高级请求剩余百分比（Trial 账号重点看这条）&#10;&#10;数值越高 = 剩余越多 = 越安全&#10;悬停单条进度条可查看重置时间">余额</th><th data-i18n="table.header.models">可用模型</th><th data-i18n="table.header.status">状态</th><th data-i18n="table.header.error">错误</th><th data-i18n="table.header.lastUsed">最后使用</th><th data-i18n="table.header.key">Key</th><th data-i18n="table.header.action">操作</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -3007,6 +3200,31 @@ const App = {
     }
     const tbody = document.querySelector('#accounts-table tbody');
     const tierLabel = { pro: 'PRO', free: 'FREE', expired: I18n.t('tier.expiredLabel'), unknown: I18n.t('tier.unknown') };
+    const fmtMs = (ms) => {
+      const sec = Math.max(0, Math.ceil((ms || 0) / 1000));
+      if (sec <= 0) return I18n.t('rateLimit.ready');
+      if (sec < 60) return `${sec}s`;
+      const min = Math.floor(sec / 60);
+      const restSec = sec % 60;
+      if (min < 60) return restSec ? `${min}m ${restSec}s` : `${min}m`;
+      const hour = Math.floor(min / 60);
+      const restMin = min % 60;
+      if (hour < 24) return restMin ? `${hour}h ${restMin}m` : `${hour}h`;
+      const day = Math.floor(hour / 24);
+      const restHour = hour % 24;
+      return restHour ? `${day}d ${restHour}h` : `${day}d`;
+    };
+    const fmtAgo = (ts) => {
+      if (!ts) return '-';
+      const sec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+      if (sec < 60) return `${sec}s`;
+      if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+      if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
+      return `${Math.floor(sec / 86400)}d`;
+    };
+    const pctColor = (pct, limited = false) => limited || pct <= 10
+      ? 'var(--error)'
+      : pct <= 30 ? 'var(--warn, #f59e0b)' : 'var(--success, #10b981)';
     tbody.innerHTML = (d.accounts || []).map(a => {
       const tier = a.tier || 'unknown';
       // GetUserStatus snapshot — authoritative plan/trial/credit info (may be null)
@@ -3042,8 +3260,13 @@ const App = {
 
       // Compact summary: avail/total + 编辑 button. Clicking opens modal.
       const tierModels = a.tierModels || [];
-      const blockedCount = (a.blockedModels || []).length;
-      const availCount = tierModels.length - blockedCount;
+      const blockedSet = new Set(a.blockedModels || []);
+      const availableModels = Array.isArray(a.availableModels)
+        ? a.availableModels
+        : tierModels.filter(m => !blockedSet.has(m));
+      const availableSet = new Set(availableModels);
+      const blockedCount = Math.max(0, tierModels.length - availableModels.length);
+      const availCount = availableModels.length;
       const capsHtml = tierModels.length
         ? `<button class="btn btn-ghost btn-xs" style="min-width:96px" onclick="App.openBlockedModal('${this.escJsAttr(a.id)}')" title="${I18n.t('account.editModels')}">
              <span style="color:var(--success,#10b981);font-weight:600">${availCount}</span>
@@ -3066,6 +3289,61 @@ const App = {
             </div>
            </div>`
         : `<span class="text-xs text-dim">-</span>`;
+
+      const rl = a.rateLimitSnapshot || null;
+      const modelCooldownCount = Array.isArray(a.modelRateLimitDetails)
+        ? a.modelRateLimitDetails.filter(x => !availableSet.size || availableSet.has(x.modelKey)).length
+        : Object.keys(a.modelRateLimits || {}).filter(m => !availableSet.size || availableSet.has(m)).length;
+      const modelCooldownTag = modelCooldownCount > 0
+        ? `<span>${I18n.t('rateLimit.modelCooldowns', { count: modelCooldownCount })}</span>`
+        : '';
+      let limitCell;
+      if (rl?.lastError) {
+        limitCell = `<div class="limit-cell">
+          <span class="limit-unknown" style="color:var(--error)" title="${this.esc(rl.lastError)}">${I18n.t('rateLimit.fetchFailed')}</span>
+          ${modelCooldownTag ? `<div class="limit-meta">${modelCooldownTag}</div>` : ''}
+        </div>`;
+      } else if (rl && rl.maxMessages > 0 && rl.messagesRemaining >= 0) {
+        const remainPct = rl.percentRemaining == null
+          ? Math.max(0, Math.min(100, (rl.messagesRemaining / rl.maxMessages) * 100))
+          : Math.max(0, Math.min(100, rl.percentRemaining));
+        const limited = rl.hasCapacity === false;
+        const color = pctColor(remainPct, limited);
+        const resetText = rl.retryAfterMs > 0
+          ? I18n.t('rateLimit.recoversIn', { time: fmtMs(rl.retryAfterMs) })
+          : (rl.resetAt ? I18n.t('rateLimit.ready') : '');
+        const title = [
+          I18n.t('rateLimit.remainingDetail', { remain: rl.messagesRemaining, max: rl.maxMessages }),
+          I18n.t('rateLimit.usedDetail', { used: rl.messagesUsed ?? '-' }),
+          rl.resetAt ? I18n.t('rateLimit.resetAt', { time: new Date(rl.resetAt).toLocaleString() }) : '',
+          rl.fetchedAt ? I18n.t('rateLimit.fetchedAgo', { time: fmtAgo(rl.fetchedAt) }) : '',
+        ].filter(Boolean).join('\n');
+        limitCell = `<div class="limit-cell" title="${this.esc(title)}">
+          <div class="limit-line">
+            <span class="limit-title" style="color:${color}">${limited ? I18n.t('rateLimit.limited') : I18n.t('rateLimit.remaining')}</span>
+            <span class="limit-sub">${rl.messagesRemaining}/${rl.maxMessages}</span>
+          </div>
+          <div class="limit-bar"><div class="limit-fill" style="width:${remainPct}%;background:${color}"></div></div>
+          <div class="limit-meta">
+            <span>${I18n.t('rateLimit.usedShort', { used: rl.messagesUsed ?? '-' })}</span>
+            ${resetText ? `<strong>${resetText}</strong>` : ''}
+            ${modelCooldownTag}
+          </div>
+        </div>`;
+      } else if (a.rateLimitRetryAfterMs > 0) {
+        limitCell = `<div class="limit-cell">
+          <div class="limit-line">
+            <span class="limit-title" style="color:var(--warn)">${I18n.t('rateLimit.globalCooldown')}</span>
+            <span class="limit-sub">${fmtMs(a.rateLimitRetryAfterMs)}</span>
+          </div>
+          <div class="limit-meta"><strong>${I18n.t('rateLimit.recoversIn', { time: fmtMs(a.rateLimitRetryAfterMs) })}</strong>${modelCooldownTag}</div>
+        </div>`;
+      } else {
+        limitCell = `<div class="limit-cell">
+          <span class="limit-unknown">${I18n.t('rateLimit.notChecked')}</span>
+          ${modelCooldownTag ? `<div class="limit-meta">${modelCooldownTag}</div>` : ''}
+        </div>`;
+      }
 
       // Credit / quota cell — collapses the legacy credit contract and the
       // newer daily/weekly percent contract into a single progress bar.
@@ -3121,6 +3399,7 @@ const App = {
           </div>
         </td>
         <td>${rpmCell}</td>
+        <td>${limitCell}</td>
         <td>${creditCell}</td>
         <td>${capsHtml}</td>
         <td><span class="badge ${a.status}">${a.status}</span>${rateLimitBadge}</td>
@@ -3132,6 +3411,7 @@ const App = {
         <td class="nowrap">
           <div class="btn-group">
             <button class="btn btn-ghost btn-xs" onclick="App.probeAccount('${this.escJsAttr(a.id)}')" title="${I18n.t('action.probeTitle')}">${I18n.t('action.probe')}</button>
+            <button class="btn btn-ghost btn-xs" onclick="App.checkRateLimit('${this.escJsAttr(a.id)}')" title="${I18n.t('rateLimit.checkTitle')}">${I18n.t('action.rateLimit')}</button>
             <button class="btn btn-ghost btn-xs" onclick="App.refreshCredits('${this.escJsAttr(a.id)}')" title="${I18n.t('account.credits.refreshTitle')}">${I18n.t('table.header.credits')}</button>
             ${a.status === 'active'
               ? `<button class="btn btn-ghost btn-xs" onclick="App.toggleAccount('${this.escJsAttr(a.id)}','disabled')">${I18n.t('action.disable')}</button>`
@@ -3140,8 +3420,8 @@ const App = {
             <button class="btn btn-ghost btn-xs" style="color:var(--error)" onclick="App.deleteAccount('${this.escJsAttr(a.id)}')">${I18n.t('action.delete')}</button>
           </div>
         </td>
-      </tr>${isExpanded ? `<tr class="account-detail-row"><td colspan="11">${this.renderAccountDetail(a)}</td></tr>` : ''}`;
-    }).join('') || `<tr class="empty-row"><td colspan="11">${I18n.t('table.empty.accounts')}</td></tr>`;
+      </tr>${isExpanded ? `<tr class="account-detail-row"><td colspan="12">${this.renderAccountDetail(a)}</td></tr>` : ''}`;
+    }).join('') || `<tr class="empty-row"><td colspan="12">${I18n.t('table.empty.accounts')}</td></tr>`;
   },
 
   _expandedAccounts: new Set(),
@@ -3217,6 +3497,11 @@ const App = {
     // Group tierModels by provider
     const tierModels = a.tierModels || [];
     const blocked = new Set(a.blockedModels || []);
+    const visibleModels = Array.isArray(a.availableModels)
+      ? a.availableModels
+      : tierModels.filter(m => !blocked.has(m));
+    const visibleSet = new Set(visibleModels);
+    const hiddenCount = Math.max(0, tierModels.length - visibleModels.length);
     const providerOrder = ['anthropic', 'openai', 'google', 'deepseek', 'xai', 'alibaba', 'moonshot', 'zhipu', 'minimax', 'windsurf', 'other'];
     const providerColors = {
       anthropic: '#d97706', openai: '#10b981', google: '#4285f4', deepseek: '#7c3aed',
@@ -3230,25 +3515,23 @@ const App = {
       windsurf: 'Windsurf · SWE', other: 'Other',
     };
     const groups = {};
-    for (const m of tierModels) {
+    for (const m of visibleModels) {
       const info = catalog[m] || {};
       const prov = info.provider || 'other';
       (groups[prov] = groups[prov] || []).push({ id: m, ...info });
     }
-    const availCount = tierModels.length - blocked.size;
+    const availCount = visibleModels.length;
     const modelGroupsHtml = providerOrder
       .filter(p => groups[p])
       .map(p => {
         const models = groups[p].sort((a, b) => (a.credit || 0) - (b.credit || 0));
-        const blockedIn = models.filter(m => blocked.has(m.id)).length;
-        const availIn = models.length - blockedIn;
         return `<div class="model-group">
           <div class="model-group-head">
             <span class="model-group-name"><span class="provider-swatch" style="background:${providerColors[p]}"></span>${providerLabels[p] || p}</span>
-            <span class="model-group-count">${availIn}/${models.length}</span>
+            <span class="model-group-count">${models.length}</span>
           </div>
           <div class="model-chips">
-            ${models.map(m => `<div class="model-chip ${blocked.has(m.id) ? 'blocked' : ''}" title="${m.id}">
+            ${models.map(m => `<div class="model-chip" title="${m.id}">
               <span class="model-chip-dot"></span>
               <span class="model-chip-name">${this.esc(m.id)}</span>
               ${m.credit != null ? `<span class="model-chip-cost" title="${T('creditPerCall')}">${m.credit}${T('creditUnit')}</span>` : `<span class="model-chip-cost" style="color:var(--text-dim);background:transparent;border-color:var(--border)">—</span>`}
@@ -3257,12 +3540,13 @@ const App = {
         </div>`;
       }).join('');
 
-    const modelCooldowns = Array.isArray(a.modelRateLimitDetails) ? a.modelRateLimitDetails : [];
+    const modelCooldowns = (Array.isArray(a.modelRateLimitDetails) ? a.modelRateLimitDetails : [])
+      .filter(x => !visibleSet.size || visibleSet.has(x.modelKey));
     const modelCooldownHtml = modelCooldowns.length
       ? `<div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--border)">
           <div style="font-size:11px;font-weight:700;color:var(--warn,#f59e0b);margin-bottom:8px">Model cooldowns</div>
           <div class="model-chips">
-            ${modelCooldowns.map(x => `<div class="model-chip blocked" title="Reset: ${this.esc(x.resetAtIso || '')}">
+            ${modelCooldowns.map(x => `<div class="model-chip cooldown" title="Reset: ${this.esc(x.resetAtIso || '')}">
               <span class="model-chip-dot"></span>
               <span class="model-chip-name">${this.esc(x.modelKey)}</span>
               <span class="model-chip-cost" style="color:var(--warn,#f59e0b);border-color:rgba(245,158,11,.35);background:rgba(245,158,11,.10)">${fmtCooldown(x.retryAfterMs)}</span>
@@ -3304,12 +3588,16 @@ const App = {
           <div class="detail-card-head">
             <span class="dot" style="background:var(--success);box-shadow:0 0 6px var(--success)"></span>
             ${T('models.title')}
-            <span style="color:var(--text-dim);font-weight:400;font-size:11px;margin-left:6px">${availCount} / ${tierModels.length} ${T('models.available')}${blocked.size > 0 ? ` · ${blocked.size} ${T('models.blocked')}` : ''}</span>
+            <span class="model-summary"><b>${availCount}</b><span>${T('models.available')}</span>${hiddenCount > 0 ? `<span class="muted-pill">${hiddenCount} ${T('models.blocked')}</span>` : ''}</span>
             <div style="margin-left:auto;display:flex;gap:4px">
               <button class="btn btn-ghost btn-xs" onclick="App.openBlockedModal('${this.escJsAttr(a.id)}')" style="font-size:10px">${I18n.t('account.editModels')}</button>
             </div>
           </div>
-          ${tierModels.length === 0 ? `<div style="color:var(--text-dim);font-size:12px;padding:10px 0">${I18n.t('toast.noTierModels')}</div>` : modelGroupsHtml}
+          ${tierModels.length === 0
+            ? `<div class="model-empty">${I18n.t('toast.noTierModels')}</div>`
+            : visibleModels.length === 0
+              ? `<div class="model-empty"><span>${T('models.blocked')}</span><button class="btn btn-ghost btn-xs" onclick="App.openBlockedModal('${this.escJsAttr(a.id)}')">${I18n.t('account.editModels')}</button></div>`
+              : modelGroupsHtml}
         </div>
 
         <div class="detail-card" style="grid-column:1/-1">
@@ -3348,6 +3636,34 @@ const App = {
         this.toast(r.error || I18n.t('toast.credits.refreshFailed'), 'error');
       }
     } catch (e) { this.toast(I18n.t('toast.credits.refreshFailed') + ': ' + e.message, 'error'); }
+  },
+
+  async checkRateLimit(id) {
+    this.toast(I18n.t('toast.rateLimit.checking'), 'info');
+    try {
+      const r = await this.api('POST', `/accounts/${id}/rate-limit`, {});
+      if (r.success || r.ok) {
+        this.toast(I18n.t('toast.rateLimit.refreshed'));
+        this.loadAccounts();
+      } else {
+        this.toast(r.error || I18n.t('toast.rateLimit.refreshFailed'), 'error');
+      }
+    } catch (e) { this.toast(I18n.t('toast.rateLimit.refreshFailed') + ': ' + e.message, 'error'); }
+  },
+
+  async refreshAllRateLimits() {
+    this.toast(I18n.t('toast.rateLimit.refreshing'), 'info');
+    try {
+      const r = await this.api('POST', '/accounts/rate-limit', {});
+      if (r.success) {
+        const okCount = (r.results || []).filter(x => x.ok).length;
+        const failCount = (r.results || []).length - okCount;
+        this.toast(I18n.t('toast.rateLimit.allRefreshed', { ok: okCount, fail: failCount }));
+        this.loadAccounts();
+      } else {
+        this.toast(r.error || I18n.t('toast.rateLimit.refreshFailed'), 'error');
+      }
+    } catch (e) { this.toast(I18n.t('toast.rateLimit.refreshFailed') + ': ' + e.message, 'error'); }
   },
 
   async refreshAllCredits() {
@@ -3418,29 +3734,30 @@ const App = {
       const total = tierModels.length;
       const availInit = total - blocked.size;
       const html = `
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;padding:8px 10px;background:var(--surface-2);border-radius:6px">
+        <div class="bm-summary">
           <div class="text-xs text-dim">${I18n.t('modal.blockedModels.hint')}</div>
-          <div style="font-size:13px">
-            ${I18n.t('modal.blockedModels.enabled')} <span id="bm-avail" style="color:var(--success,#10b981);font-weight:600">${availInit}</span>
+          <div class="bm-summary-count">
+            ${I18n.t('modal.blockedModels.enabled')} <b id="bm-avail">${availInit}</b>
             <span style="color:var(--text-dim)"> / ${total}</span>
           </div>
         </div>
-        <div style="display:flex;gap:6px;margin-bottom:10px">
+        <div class="bm-toolbar">
+          <input class="input bm-search" id="bm-search" placeholder="${I18n.t('field.searchModel.placeholder')}" oninput="App.blockedModalFilter(this.value)">
           <button class="btn btn-ghost btn-xs" onclick="App.blockedModalToggleAll(true)">${I18n.t('action.selectAll')}</button>
           <button class="btn btn-ghost btn-xs" onclick="App.blockedModalToggleAll(false)">${I18n.t('action.selectNone')}</button>
           <button class="btn btn-ghost btn-xs" onclick="App.blockedModalInvert()">${I18n.t('action.invert')}</button>
         </div>
-        <div style="max-height:50vh;overflow:auto;padding:2px 2px 2px 0">
+        <div class="bm-list">
           ${Object.entries(groups).map(([provider, models]) => `
-            <div class="bm-group" data-provider="${provider}" style="margin-bottom:12px;border:1px solid var(--border);border-radius:6px;padding:8px 10px">
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--border)">
+            <div class="bm-group" data-provider="${provider}">
+              <label class="bm-group-head">
                 <input type="checkbox" class="bm-group-cb" data-provider="${provider}">
-                <span style="text-transform:uppercase;letter-spacing:.5px;font-size:11px;color:var(--text-muted);font-weight:600">${provider}</span>
-                <span class="text-xs text-dim" data-role="count">(${models.filter(m => !blocked.has(m)).length}/${models.length})</span>
+                <span class="bm-group-name">${provider}</span>
+                <span class="bm-group-count" data-role="count">(${models.filter(m => !blocked.has(m)).length}/${models.length})</span>
               </label>
-              <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 10px">
+              <div class="bm-grid">
                 ${models.map(m => `
-                  <label style="display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:3px;cursor:pointer;font-size:12px" onmouseover="this.style.background='var(--surface-2)'" onmouseout="this.style.background=''">
+                  <label class="bm-item" data-model-row="${this.esc(m).toLowerCase()}">
                     <input type="checkbox" class="blocked-model-cb" data-model="${this.esc(m)}" data-provider="${provider}" ${blocked.has(m) ? '' : 'checked'}>
                     <span>${this.esc(m)}</span>
                   </label>
@@ -3523,6 +3840,21 @@ const App = {
         okBtn.disabled = false; cancelBtn.disabled = false; okBtn.textContent = I18n.t('action.save');
       }
     };
+  },
+
+  blockedModalFilter(query) {
+    const root = document.querySelector('.modal-overlay:last-child');
+    if (!root) return;
+    const q = String(query || '').trim().toLowerCase();
+    root.querySelectorAll('.bm-group').forEach(group => {
+      let visible = 0;
+      group.querySelectorAll('.bm-item').forEach(row => {
+        const hit = !q || String(row.dataset.modelRow || '').includes(q);
+        row.style.display = hit ? '' : 'none';
+        if (hit) visible++;
+      });
+      group.style.display = visible ? '' : 'none';
+    });
   },
 
   blockedModalToggleAll(checked) {

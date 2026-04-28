@@ -119,6 +119,50 @@ function modelRateLimitDetails(account, now = Date.now()) {
   });
 }
 
+function numericOr(value, fallback = null) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+export function buildRateLimitSnapshot(result = {}, now = Date.now()) {
+  const remainingRaw = numericOr(result.messagesRemaining, -1);
+  const maxRaw = numericOr(result.maxMessages, -1);
+  const retryRaw = numericOr(result.retryAfterMs, null);
+  const messagesRemaining = remainingRaw >= 0 ? Math.floor(remainingRaw) : -1;
+  const maxMessages = maxRaw >= 0 ? Math.floor(maxRaw) : -1;
+  const messagesUsed = maxMessages >= 0 && messagesRemaining >= 0
+    ? Math.max(0, maxMessages - messagesRemaining)
+    : null;
+  const percentRemaining = maxMessages > 0 && messagesRemaining >= 0
+    ? Math.max(0, Math.min(100, (messagesRemaining / maxMessages) * 100))
+    : null;
+  const retryAfterMs = retryRaw != null && retryRaw > 0 ? Math.ceil(retryRaw) : null;
+  const resetAt = retryAfterMs ? now + retryAfterMs : null;
+  return {
+    hasCapacity: result.hasCapacity !== false,
+    messagesRemaining,
+    maxMessages,
+    messagesUsed,
+    percentRemaining,
+    retryAfterMs,
+    resetAt,
+    resetAtIso: resetAt ? new Date(resetAt).toISOString() : null,
+    fetchedAt: now,
+    source: 'CheckRateLimit',
+  };
+}
+
+function rateLimitSnapshotForList(account, now = Date.now()) {
+  const snapshot = account.rateLimitSnapshot;
+  if (!snapshot || typeof snapshot !== 'object') return null;
+  const out = { ...snapshot };
+  if (out.resetAt) {
+    const ms = Number(out.resetAt) - now;
+    out.retryAfterMs = ms > 0 ? Math.max(1000, ms) : 0;
+  }
+  return out;
+}
+
 // Serialize concurrent saveAccounts calls — multiple async paths
 // (reportSuccess / markRateLimited / updateCapability / probe) can fire
 // together; without a mutex the last writer wins on stale memory state.
@@ -145,6 +189,8 @@ function _serializeAccounts() {
     tier: a.tier, tierManual: !!a.tierManual,
     capabilities: a.capabilities, lastProbed: a.lastProbed,
     credits: a.credits || null,
+    rateLimitedUntil: a.rateLimitedUntil || 0,
+    rateLimitSnapshot: a.rateLimitSnapshot || null,
     modelRateLimits: activeModelRateLimits(a),
     blockedModels: a.blockedModels || [],
     refreshToken: a.refreshToken || '',
@@ -261,6 +307,8 @@ function loadAccounts() {
         capabilities: a.capabilities || {},
         lastProbed: a.lastProbed || 0,
         credits: a.credits || null,
+        rateLimitedUntil: a.rateLimitedUntil || 0,
+        rateLimitSnapshot: a.rateLimitSnapshot && typeof a.rateLimitSnapshot === 'object' ? a.rateLimitSnapshot : null,
         _modelRateLimits: a.modelRateLimits && typeof a.modelRateLimits === 'object' ? a.modelRateLimits : {},
         blockedModels: Array.isArray(a.blockedModels) ? a.blockedModels : [],
         tierManual: !!a.tierManual,
@@ -328,6 +376,8 @@ export function addAccountByKey(apiKey, label = '') {
     capabilities: {},
     lastProbed: 0,
     blockedModels: [],
+    rateLimitedUntil: 0,
+    rateLimitSnapshot: null,
   };
   account.credits = null;
   accounts.push(account);
@@ -362,6 +412,8 @@ export async function addAccountByToken(token, label = '') {
     lastProbed: 0,
     blockedModels: [],
     credits: null,
+    rateLimitedUntil: 0,
+    rateLimitSnapshot: null,
   };
   accounts.push(account);
   saveAccounts();
@@ -672,13 +724,27 @@ export function markRateLimited(apiKey, durationMs = 5 * 60 * 1000, modelKey = n
   const account = accounts.find(a => a.apiKey === apiKey);
   if (!account) return;
   const safeMs = Math.max(1000, Number(durationMs) || 0);
-  const until = Date.now() + safeMs;
+  const now = Date.now();
+  const until = now + safeMs;
   if (modelKey) {
     if (!account._modelRateLimits) account._modelRateLimits = {};
     account._modelRateLimits[modelKey] = Math.max(account._modelRateLimits[modelKey] || 0, until);
     log.warn(`Account ${account.id} (${account.email}) rate-limited on ${modelKey} for ${Math.round(safeMs / 60000)} min`);
   } else {
     account.rateLimitedUntil = Math.max(account.rateLimitedUntil || 0, until);
+    account.rateLimitSnapshot = {
+      ...(account.rateLimitSnapshot || {}),
+      hasCapacity: false,
+      messagesRemaining: account.rateLimitSnapshot?.messagesRemaining ?? -1,
+      maxMessages: account.rateLimitSnapshot?.maxMessages ?? -1,
+      messagesUsed: account.rateLimitSnapshot?.messagesUsed ?? null,
+      percentRemaining: account.rateLimitSnapshot?.percentRemaining ?? null,
+      retryAfterMs: Math.max(1000, account.rateLimitedUntil - now),
+      resetAt: account.rateLimitedUntil,
+      resetAtIso: new Date(account.rateLimitedUntil).toISOString(),
+      fetchedAt: now,
+      source: 'local_rate_limit_error',
+    };
     log.warn(`Account ${account.id} (${account.email}) rate-limited (all models) for ${Math.round(safeMs / 60000)} min`);
   }
   saveAccounts();
@@ -863,6 +929,7 @@ export function getAccountList() {
       rpmUsed,
       rpmLimit,
       credits: a.credits || null,
+      rateLimitSnapshot: rateLimitSnapshotForList(a, now),
       blockedModels: a.blockedModels || [],
       availableModels: getAvailableModelsForAccount(a),
       tierModels: getTierModels(a.tier || 'unknown'),
@@ -920,6 +987,54 @@ export async function refreshAllCredits() {
     if (a.status !== 'active') continue;
     const r = await refreshCredits(a.id);
     results.push({ id: a.id, email: a.email, ok: r.ok, error: r.error });
+  }
+  return results;
+}
+
+export async function refreshRateLimitStatus(id) {
+  const account = accounts.find(a => a.id === id);
+  if (!account) return { ok: false, error: 'Account not found' };
+  try {
+    const { checkMessageRateLimit } = await import('./windsurf-api.js');
+    const proxy = getEffectiveProxy(account.id) || null;
+    const result = await checkMessageRateLimit(account.apiKey, proxy);
+    const previousSource = account.rateLimitSnapshot?.source || '';
+    const snapshot = buildRateLimitSnapshot(result);
+    account.rateLimitSnapshot = snapshot;
+    if (snapshot.hasCapacity === false && snapshot.resetAt) {
+      account.rateLimitedUntil = Math.max(account.rateLimitedUntil || 0, snapshot.resetAt);
+    } else if (snapshot.hasCapacity !== false && ['CheckRateLimit', 'local_rate_limit_error'].includes(previousSource)) {
+      account.rateLimitedUntil = 0;
+    }
+    saveAccounts();
+    return { ok: true, rateLimit: rateLimitSnapshotForList(account), raw: result };
+  } catch (e) {
+    const msg = e.message || String(e);
+    log.warn(`refreshRateLimitStatus ${id} failed: ${msg}`);
+    account.rateLimitSnapshot = {
+      hasCapacity: null,
+      messagesRemaining: -1,
+      maxMessages: -1,
+      messagesUsed: null,
+      percentRemaining: null,
+      retryAfterMs: null,
+      resetAt: null,
+      resetAtIso: null,
+      fetchedAt: Date.now(),
+      source: 'CheckRateLimit',
+      lastError: msg,
+    };
+    saveAccounts();
+    return { ok: false, error: msg, rateLimit: account.rateLimitSnapshot };
+  }
+}
+
+export async function refreshAllRateLimitStatus() {
+  const results = [];
+  for (const a of accounts) {
+    if (a.status !== 'active') continue;
+    const r = await refreshRateLimitStatus(a.id);
+    results.push({ id: a.id, email: a.email, ok: r.ok, error: r.error, rateLimit: r.rateLimit });
   }
   return results;
 }

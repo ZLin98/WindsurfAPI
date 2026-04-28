@@ -79,7 +79,9 @@
     "confirm": "Confirm",
     "delete": "Delete",
     "refresh": "Refresh",
+    "refreshRateLimits": "Refresh Limits",
     "probe": "Probe",
+    "rateLimit": "Limit",
     "probeTitle": "Probe capabilities",
     "enable": "Enable",
     "disable": "Disable",
@@ -160,6 +162,24 @@
     "weeklyNA": "Windsurf returned no weekly-quota data",
     "promptNA": "No prompt-credit data for this account",
     "noResetTime": "reset time unknown"
+  },
+
+  "rateLimit": {
+    "columnTooltip": "Windsurf upstream message window from CheckRateLimit. Unknown means the server did not return remaining/max.",
+    "notChecked": "Not checked",
+    "fetchFailed": "Check failed",
+    "limited": "Limited",
+    "remaining": "Remaining",
+    "ready": "Ready",
+    "globalCooldown": "Global cooldown",
+    "recoversIn": "recovers in {{time}}",
+    "modelCooldowns": "{{count}} model cooldown(s)",
+    "usedShort": "used {{used}}",
+    "remainingDetail": "{{remain}} / {{max}} messages remaining",
+    "usedDetail": "{{used}} messages used",
+    "resetAt": "reset at {{time}}",
+    "fetchedAgo": "fetched {{time}} ago",
+    "checkTitle": "Check Windsurf upstream rate limit"
   },
 
   "section": {
@@ -384,6 +404,7 @@
       "label": "Label",
       "tier": "Tier",
       "rpm": "RPM",
+      "cloudLimit": "Limit",
       "credits": "Credits",
       "models": "Available Models",
       "error": "Error",
@@ -786,6 +807,13 @@
       "refreshFailed": "Failed to refresh credits",
       "refreshing": "Refreshing credits...",
       "allRefreshed": "All account credits refreshed: {{ok}} success / {{fail}} failed"
+    },
+    "rateLimit": {
+      "checking": "Checking Windsurf rate limit...",
+      "refreshed": "Rate limit refreshed",
+      "refreshFailed": "Failed to refresh rate limit",
+      "refreshing": "Refreshing account rate limits...",
+      "allRefreshed": "Rate limits refreshed: {{ok}} success / {{fail}} failed"
     }
   },
 

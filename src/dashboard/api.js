@@ -9,6 +9,7 @@ import {
   removeAccount, setAccountStatus, resetAccountErrors, updateAccountLabel,
   isAuthenticated, probeAccount, ensureLsForAccount,
   refreshCredits, refreshAllCredits,
+  refreshRateLimitStatus, refreshAllRateLimitStatus,
   setAccountBlockedModels, setAccountTokens, setAccountTier,
 } from '../auth.js';
 import { restartLsForProxy } from '../langserver.js';
@@ -22,7 +23,6 @@ import { getProxyConfig, getProxyConfigMasked, setGlobalProxy, setAccountProxy, 
 import { MODELS, MODEL_TIER_ACCESS as _TIER_TABLE, getTierModels as _getTierModels } from '../models.js';
 import { windsurfLogin, refreshFirebaseToken, reRegisterWithCodeium } from './windsurf-login.js';
 import { getModelAccessConfig, setModelAccessMode, setModelAccessList, addModelToList, removeModelFromList } from './model-access.js';
-import { checkMessageRateLimit } from '../windsurf-api.js';
 import { assertPublicUrlHost } from '../image.js';
 
 function maskApiKey(key = '') {
@@ -647,18 +647,16 @@ export async function handleDashboardApi(method, subpath, body, req, res) {
 
   // ─── Rate Limit Check ──────────────────────────────────
   // POST /accounts/:id/rate-limit — check capacity for a single account
+  if (subpath === '/accounts/rate-limit' && method === 'POST') {
+    const results = await refreshAllRateLimitStatus();
+    return json(res, 200, { success: true, results });
+  }
+
   const rateLimitCheck = subpath.match(/^\/accounts\/([^/]+)\/rate-limit$/);
   if (rateLimitCheck && method === 'POST') {
-    const list = getAccountList();
-    const acct = list.find(a => a.id === rateLimitCheck[1]);
-    if (!acct) return json(res, 404, { error: 'Account not found' });
-    try {
-      const proxy = getEffectiveProxy(acct.id) || null;
-      const result = await checkMessageRateLimit(acct.apiKey, proxy);
-      return json(res, 200, { success: true, account: acct.email, ...result });
-    } catch (err) {
-      return json(res, 500, { error: err.message });
-    }
+    const result = await refreshRateLimitStatus(rateLimitCheck[1]);
+    if (!result.ok && result.error === 'Account not found') return json(res, 404, { error: result.error });
+    return json(res, result.ok ? 200 : 400, { success: result.ok, ...result });
   }
 
   const revealKey = subpath.match(/^\/account\/([^/]+)\/reveal-key$/);

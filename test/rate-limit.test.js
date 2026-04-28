@@ -5,6 +5,7 @@ import {
   getAccountList,
   getApiKey,
   getRpmStats,
+  buildRateLimitSnapshot,
   markRateLimited,
   rememberAccountAffinity,
   releaseAccount,
@@ -31,6 +32,40 @@ afterEach(() => {
 });
 
 describe('rate-limit handling', () => {
+  it('normalizes upstream message limits into an account snapshot', () => {
+    const snapshot = buildRateLimitSnapshot({
+      hasCapacity: false,
+      messagesRemaining: 3,
+      maxMessages: 20,
+      retryAfterMs: 90_000,
+    }, 1_700_000_000_000);
+
+    assert.equal(snapshot.hasCapacity, false);
+    assert.equal(snapshot.messagesRemaining, 3);
+    assert.equal(snapshot.maxMessages, 20);
+    assert.equal(snapshot.messagesUsed, 17);
+    assert.equal(snapshot.percentRemaining, 15);
+    assert.equal(snapshot.resetAt, 1_700_000_090_000);
+    assert.equal(snapshot.resetAtIso, new Date(1_700_000_090_000).toISOString());
+    assert.equal(snapshot.fetchedAt, 1_700_000_000_000);
+  });
+
+  it('keeps unknown upstream message limits explicit instead of inventing totals', () => {
+    const snapshot = buildRateLimitSnapshot({
+      hasCapacity: true,
+      messagesRemaining: -1,
+      maxMessages: -1,
+      retryAfterMs: null,
+    }, 1_700_000_000_000);
+
+    assert.equal(snapshot.hasCapacity, true);
+    assert.equal(snapshot.messagesRemaining, -1);
+    assert.equal(snapshot.maxMessages, -1);
+    assert.equal(snapshot.messagesUsed, null);
+    assert.equal(snapshot.percentRemaining, null);
+    assert.equal(snapshot.resetAt, null);
+  });
+
   it('does not poison local cooldowns when preflight has no retryAfter hint', async () => {
     const account = addTestAccount('preflight-no-hint');
     let checks = 0;
